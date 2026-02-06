@@ -1,0 +1,49 @@
+name: Release Bundle
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Create bundle tarball
+        run: tar -czf moltworker-bundle.tar.gz -C dist moltbot_sandbox client
+
+      - name: Upload bundle as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moltworker-bundle
+          path: moltworker-bundle.tar.gz
+
+      - name: Create or update "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || 'Latest Build' }}
+          files: moltworker-bundle.tar.gz
+          prerelease: ${{ github.ref_type != 'tag' }}
+          make_latest: true
