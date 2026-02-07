@@ -142,7 +142,6 @@ if [ ! -f "$CONFIG_FILE" ]; then
         --gateway-port 18789 \
         --gateway-bind lan \
         --skip-channels \
-        --skip-skills \
         --skip-health
 
     echo "Onboard completed"
