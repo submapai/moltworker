@@ -241,6 +241,7 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
 // Telegram configuration
 // Overwrite entire channel object to drop stale keys from old R2 backups
 // that would fail OpenClaw's strict config validation (see #47)
+// Always include a default section so the control UI exposes the config form
 if (process.env.TELEGRAM_BOT_TOKEN) {
     const dmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
     config.channels.telegram = {
@@ -253,6 +254,10 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
     } else if (dmPolicy === 'open') {
         config.channels.telegram.allowFrom = ['*'];
     }
+} else if (!config.channels.telegram) {
+    config.channels.telegram = {
+        enabled: false,
+    };
 }
 
 // Discord configuration
@@ -268,6 +273,10 @@ if (process.env.DISCORD_BOT_TOKEN) {
         enabled: true,
         dm: dm,
     };
+} else if (!config.channels.discord) {
+    config.channels.discord = {
+        enabled: false,
+    };
 }
 
 // Slack configuration
@@ -276,6 +285,10 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
         botToken: process.env.SLACK_BOT_TOKEN,
         appToken: process.env.SLACK_APP_TOKEN,
         enabled: true,
+    };
+} else if (!config.channels.slack) {
+    config.channels.slack = {
+        enabled: false,
     };
 }
 
