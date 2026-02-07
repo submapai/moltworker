@@ -63,6 +63,13 @@ export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise
     return true;
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
+
+    // "already in use" means it's already mounted — treat as success
+    if (errorMessage.includes('already in use')) {
+      console.log('R2 bucket already mounted at', R2_MOUNT_PATH);
+      return true;
+    }
+
     console.log('R2 mount error:', errorMessage);
 
     // Check again if it's mounted - the error might be misleading
