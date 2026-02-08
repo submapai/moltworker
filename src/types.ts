@@ -42,6 +42,9 @@ export interface MoltbotEnv {
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
+  // Bloo.io messaging integration
+  BLOOIO_API_KEY?: string; // Bearer token for Bloo.io send API
+  BLOOIO_WEBHOOK_SECRET?: string; // HMAC secret for webhook signature verification
 }
 
 /**
