@@ -75,28 +75,86 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     };
   }
 
+  // Verify R2 mount is writable before attempting sync
+  const writeCheck = await sandbox.startProcess(
+    `touch ${R2_MOUNT_PATH}/.sync-check && rm -f ${R2_MOUNT_PATH}/.sync-check && echo "writable"`,
+  );
+  await waitForProcess(writeCheck, 10000);
+  const writeCheckLogs = await writeCheck.getLogs();
+  if (!writeCheckLogs.stdout?.includes('writable')) {
+    return {
+      success: false,
+      error: 'R2 mount is not writable',
+      details: `stdout: ${writeCheckLogs.stdout?.slice(0, 200) || '(empty)'}, stderr: ${writeCheckLogs.stderr?.slice(0, 200) || '(empty)'}`,
+    };
+  }
+
+  // Ensure target directories exist on R2 mount
+  const mkdirCmd = `mkdir -p ${R2_MOUNT_PATH}/openclaw ${R2_MOUNT_PATH}/workspace ${R2_MOUNT_PATH}/skills`;
+  const mkdirProc = await sandbox.startProcess(mkdirCmd);
+  await waitForProcess(mkdirProc, 5000);
+
   // Sync to the new openclaw/ R2 prefix (even if source is legacy .clawdbot)
   // Also sync workspace directory (excluding skills since they're synced separately)
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' ${configDir}/ ${R2_MOUNT_PATH}/openclaw/ && rsync -r --no-times --delete --exclude='skills' /root/clawd/ ${R2_MOUNT_PATH}/workspace/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  // Run each rsync separately to get better error reporting
+  const syncSteps = [
+    {
+      name: 'config',
+      cmd: `rsync -rv --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' ${configDir}/ ${R2_MOUNT_PATH}/openclaw/`,
+    },
+    {
+      name: 'workspace',
+      cmd: `rsync -rv --no-times --delete --exclude='skills' /root/clawd/ ${R2_MOUNT_PATH}/workspace/`,
+    },
+    {
+      name: 'skills',
+      cmd: `rsync -rv --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/`,
+    },
+  ];
 
   try {
-    const proc = await sandbox.startProcess(syncCmd);
-    await waitForProcess(proc, 30000); // 30 second timeout for sync
+    for (const step of syncSteps) {
+      console.log(`[sync] Starting ${step.name} sync...`);
+      const proc = await sandbox.startProcess(step.cmd);
+      await waitForProcess(proc, 30000); // 30 second timeout per step
+      const logs = await proc.getLogs();
 
-    // Check for success by reading the timestamp file
+      // Check for rsync errors in stderr
+      if (logs.stderr && logs.stderr.trim().length > 0) {
+        // rsync prints some info to stderr that isn't errors (e.g., "sending incremental file list")
+        // Only treat it as a failure if the output contains actual error indicators
+        const hasError = /error|failed|denied|refused|No such file/i.test(logs.stderr);
+        if (hasError) {
+          console.error(`[sync] ${step.name} rsync error:`, logs.stderr.slice(0, 500));
+          return {
+            success: false,
+            error: `Sync failed during ${step.name}`,
+            details: logs.stderr.slice(0, 500),
+          };
+        }
+      }
+      console.log(`[sync] ${step.name} sync completed`);
+    }
+
+    // Write sync timestamp
+    const timestampCmd = `date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+    const timestampWriteProc = await sandbox.startProcess(timestampCmd);
+    await waitForProcess(timestampWriteProc, 5000);
+
+    // Read back the timestamp to confirm
     const timestampProc = await sandbox.startProcess(`cat ${R2_MOUNT_PATH}/.last-sync`);
     await waitForProcess(timestampProc, 5000);
     const timestampLogs = await timestampProc.getLogs();
     const lastSync = timestampLogs.stdout?.trim();
 
     if (lastSync && lastSync.match(/^\d{4}-\d{2}-\d{2}/)) {
+      console.log('[sync] Backup completed successfully at', lastSync);
       return { success: true, lastSync };
     } else {
-      const logs = await proc.getLogs();
       return {
         success: false,
-        error: 'Sync failed',
-        details: logs.stderr || logs.stdout || 'No timestamp file created',
+        error: 'Sync completed but timestamp verification failed',
+        details: `timestamp stdout: ${timestampLogs.stdout?.slice(0, 100) || '(empty)'}`,
       };
     }
   } catch (err) {

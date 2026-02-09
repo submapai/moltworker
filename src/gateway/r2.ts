@@ -27,11 +27,40 @@ async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
 }
 
 /**
+ * Verify that the R2 mount is actually writable by writing and reading a probe file.
+ * s3fs can mount lazily without verifying credentials, so we need an explicit check.
+ */
+async function verifyR2Writable(sandbox: Sandbox): Promise<boolean> {
+  const probeFile = `${R2_MOUNT_PATH}/.write-probe`;
+  try {
+    const probeValue = `probe-${Date.now()}`;
+    const proc = await sandbox.startProcess(
+      `echo "${probeValue}" > ${probeFile} && cat ${probeFile}`,
+    );
+    let attempts = 0;
+    while (proc.status === 'running' && attempts < 20) {
+      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
+      await new Promise((r) => setTimeout(r, 500));
+      attempts++;
+    }
+    const logs = await proc.getLogs();
+    const writable = !!(logs.stdout && logs.stdout.includes(probeValue));
+    if (!writable) {
+      console.error('R2 mount write verification failed. stdout:', logs.stdout?.slice(0, 200), 'stderr:', logs.stderr?.slice(0, 200));
+    }
+    return writable;
+  } catch (err) {
+    console.error('R2 write verification error:', err);
+    return false;
+  }
+}
+
+/**
  * Mount R2 bucket for persistent storage
  *
  * @param sandbox - The sandbox instance
  * @param env - Worker environment bindings
- * @returns true if mounted successfully, false otherwise
+ * @returns true if mounted and writable, false otherwise
  */
 export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise<boolean> {
   // Skip if R2 credentials are not configured
@@ -59,7 +88,14 @@ export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise
         secretAccessKey: env.R2_SECRET_ACCESS_KEY,
       },
     });
-    console.log('R2 bucket mounted successfully - moltbot data will persist across sessions');
+
+    // Verify the mount is actually writable (s3fs can mount without credential validation)
+    if (!await verifyR2Writable(sandbox)) {
+      console.error('R2 bucket mounted but not writable — credentials may be invalid');
+      return false;
+    }
+
+    console.log('R2 bucket mounted and verified writable at', R2_MOUNT_PATH);
     return true;
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
