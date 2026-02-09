@@ -15,108 +15,16 @@ fi
 
 CONFIG_DIR="/root/.openclaw"
 CONFIG_FILE="$CONFIG_DIR/openclaw.json"
-BACKUP_DIR="/data/moltbot"
 
 echo "Config directory: $CONFIG_DIR"
-echo "Backup directory: $BACKUP_DIR"
 
 mkdir -p "$CONFIG_DIR"
 
 # ============================================================
 # RESTORE FROM R2 BACKUP
 # ============================================================
-
-should_restore_from_r2() {
-    local R2_SYNC_FILE="$BACKUP_DIR/.last-sync"
-    local LOCAL_SYNC_FILE="$CONFIG_DIR/.last-sync"
-
-    if [ ! -f "$R2_SYNC_FILE" ]; then
-        echo "No R2 sync timestamp found, skipping restore"
-        return 1
-    fi
-
-    if [ ! -f "$LOCAL_SYNC_FILE" ]; then
-        echo "No local sync timestamp, will restore from R2"
-        return 0
-    fi
-
-    R2_TIME=$(cat "$R2_SYNC_FILE" 2>/dev/null)
-    LOCAL_TIME=$(cat "$LOCAL_SYNC_FILE" 2>/dev/null)
-
-    echo "R2 last sync: $R2_TIME"
-    echo "Local last sync: $LOCAL_TIME"
-
-    R2_EPOCH=$(date -d "$R2_TIME" +%s 2>/dev/null || echo "0")
-    LOCAL_EPOCH=$(date -d "$LOCAL_TIME" +%s 2>/dev/null || echo "0")
-
-    if [ "$R2_EPOCH" -gt "$LOCAL_EPOCH" ]; then
-        echo "R2 backup is newer, will restore"
-        return 0
-    else
-        echo "Local data is newer or same, skipping restore"
-        return 1
-    fi
-}
-
-# Check for backup data in new openclaw/ prefix first, then legacy clawdbot/ prefix
-if [ -f "$BACKUP_DIR/openclaw/openclaw.json" ]; then
-    if should_restore_from_r2; then
-        echo "Restoring from R2 backup at $BACKUP_DIR/openclaw..."
-        cp -a "$BACKUP_DIR/openclaw/." "$CONFIG_DIR/"
-        cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
-        echo "Restored config from R2 backup"
-    fi
-elif [ -f "$BACKUP_DIR/clawdbot/clawdbot.json" ]; then
-    # Legacy backup format — migrate .clawdbot data into .openclaw
-    if should_restore_from_r2; then
-        echo "Restoring from legacy R2 backup at $BACKUP_DIR/clawdbot..."
-        cp -a "$BACKUP_DIR/clawdbot/." "$CONFIG_DIR/"
-        cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
-        # Rename the config file if it has the old name
-        if [ -f "$CONFIG_DIR/clawdbot.json" ] && [ ! -f "$CONFIG_FILE" ]; then
-            mv "$CONFIG_DIR/clawdbot.json" "$CONFIG_FILE"
-        fi
-        echo "Restored and migrated config from legacy R2 backup"
-    fi
-elif [ -f "$BACKUP_DIR/clawdbot.json" ]; then
-    # Very old legacy backup format (flat structure)
-    if should_restore_from_r2; then
-        echo "Restoring from flat legacy R2 backup at $BACKUP_DIR..."
-        cp -a "$BACKUP_DIR/." "$CONFIG_DIR/"
-        cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
-        if [ -f "$CONFIG_DIR/clawdbot.json" ] && [ ! -f "$CONFIG_FILE" ]; then
-            mv "$CONFIG_DIR/clawdbot.json" "$CONFIG_FILE"
-        fi
-        echo "Restored and migrated config from flat legacy R2 backup"
-    fi
-elif [ -d "$BACKUP_DIR" ]; then
-    echo "R2 mounted at $BACKUP_DIR but no backup data found yet"
-else
-    echo "R2 not mounted, starting fresh"
-fi
-
-# Restore workspace from R2 backup if available (only if R2 is newer)
-# This includes IDENTITY.md, USER.md, MEMORY.md, memory/, and assets/
-WORKSPACE_DIR="/root/clawd"
-if [ -d "$BACKUP_DIR/workspace" ] && [ "$(ls -A $BACKUP_DIR/workspace 2>/dev/null)" ]; then
-    if should_restore_from_r2; then
-        echo "Restoring workspace from $BACKUP_DIR/workspace..."
-        mkdir -p "$WORKSPACE_DIR"
-        cp -a "$BACKUP_DIR/workspace/." "$WORKSPACE_DIR/"
-        echo "Restored workspace from R2 backup"
-    fi
-fi
-
-# Restore skills from R2 backup if available (only if R2 is newer)
-SKILLS_DIR="/root/clawd/skills"
-if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ]; then
-    if should_restore_from_r2; then
-        echo "Restoring skills from $BACKUP_DIR/skills..."
-        mkdir -p "$SKILLS_DIR"
-        cp -a "$BACKUP_DIR/skills/." "$SKILLS_DIR/"
-        echo "Restored skills from R2 backup"
-    fi
-fi
+# R2 restore is handled by the worker via restoreFromR2() before
+# this script runs. No s3fs mount or bash-level restore needed.
 
 # ============================================================
 # ONBOARD (only if no config exists yet)

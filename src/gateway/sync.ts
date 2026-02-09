@@ -1,8 +1,5 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
-import { R2_MOUNT_PATH } from '../config';
-import { mountR2Storage } from './r2';
-import { waitForProcess } from './utils';
 
 export interface SyncResult {
   success: boolean;
@@ -11,53 +8,37 @@ export interface SyncResult {
   details?: string;
 }
 
+/** File extensions to exclude from backup */
+const EXCLUDED_EXTENSIONS = ['.lock', '.log', '.tmp'];
+
+/** Check if a file should be excluded from sync */
+function shouldExclude(filePath: string): boolean {
+  return EXCLUDED_EXTENSIONS.some((ext) => filePath.endsWith(ext));
+}
+
 /**
  * Sync OpenClaw config and workspace from container to R2 for persistence.
  *
- * This function:
- * 1. Mounts R2 if not already mounted
- * 2. Verifies source has critical files (prevents overwriting good backup with empty data)
- * 3. Runs rsync to copy config, workspace, and skills to R2
- * 4. Writes a timestamp file for tracking
+ * Uses the R2 bucket binding directly (no s3fs FUSE mount).
  *
  * Syncs three directories:
- * - Config: /root/.openclaw/ (or /root/.clawdbot/) → R2:/openclaw/
- * - Workspace: /root/clawd/ → R2:/workspace/ (IDENTITY.md, MEMORY.md, memory/, assets/)
- * - Skills: /root/clawd/skills/ → R2:/skills/
- *
- * @param sandbox - The sandbox instance
- * @param env - Worker environment bindings
- * @returns SyncResult with success status and optional error details
+ * - Config: /root/.openclaw/ (or /root/.clawdbot/) → R2: openclaw/
+ * - Workspace: /root/clawd/ → R2: workspace/ (excluding skills/)
+ * - Skills: /root/clawd/skills/ → R2: skills/
  */
 export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncResult> {
-  // Check if R2 is configured
-  if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
+  const bucket = env.MOLTBOT_BUCKET;
+  if (!bucket) {
     return { success: false, error: 'R2 storage is not configured' };
   }
 
-  // Mount R2 if not already mounted
-  const mounted = await mountR2Storage(sandbox, env);
-  if (!mounted) {
-    return { success: false, error: 'Failed to mount R2 storage' };
-  }
-
   // Determine which config directory exists
-  // Check new path first, fall back to legacy
-  // Use stdout parsing — exitCode may be null/undefined in the Cloudflare Sandbox API
   let configDir = '/root/.openclaw';
   try {
-    const checkNew = await sandbox.startProcess(
-      'test -f /root/.openclaw/openclaw.json && echo "ok"',
-    );
-    await waitForProcess(checkNew, 5000);
-    const newLogs = await checkNew.getLogs();
-    if (!newLogs.stdout?.includes('ok')) {
-      const checkLegacy = await sandbox.startProcess(
-        'test -f /root/.clawdbot/clawdbot.json && echo "ok"',
-      );
-      await waitForProcess(checkLegacy, 5000);
-      const legacyLogs = await checkLegacy.getLogs();
-      if (legacyLogs.stdout?.includes('ok')) {
+    const checkNew = await sandbox.exists('/root/.openclaw/openclaw.json');
+    if (!checkNew.exists) {
+      const checkLegacy = await sandbox.exists('/root/.clawdbot/clawdbot.json');
+      if (checkLegacy.exists) {
         configDir = '/root/.clawdbot';
       } else {
         return {
@@ -75,92 +56,148 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     };
   }
 
-  // Verify R2 mount is writable before attempting sync
-  const writeCheck = await sandbox.startProcess(
-    `touch ${R2_MOUNT_PATH}/.sync-check && rm -f ${R2_MOUNT_PATH}/.sync-check && echo "writable"`,
-  );
-  await waitForProcess(writeCheck, 10000);
-  const writeCheckLogs = await writeCheck.getLogs();
-  if (!writeCheckLogs.stdout?.includes('writable')) {
-    return {
-      success: false,
-      error: 'R2 mount is not writable',
-      details: `stdout: ${writeCheckLogs.stdout?.slice(0, 200) || '(empty)'}, stderr: ${writeCheckLogs.stderr?.slice(0, 200) || '(empty)'}`,
-    };
-  }
-
-  // Ensure target directories exist on R2 mount
-  const mkdirCmd = `mkdir -p ${R2_MOUNT_PATH}/openclaw ${R2_MOUNT_PATH}/workspace ${R2_MOUNT_PATH}/skills`;
-  const mkdirProc = await sandbox.startProcess(mkdirCmd);
-  await waitForProcess(mkdirProc, 5000);
-
-  // Sync to the new openclaw/ R2 prefix (even if source is legacy .clawdbot)
-  // Also sync workspace directory (excluding skills since they're synced separately)
-  // Run each rsync separately to get better error reporting
   const syncSteps = [
-    {
-      name: 'config',
-      cmd: `rsync -rv --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' ${configDir}/ ${R2_MOUNT_PATH}/openclaw/`,
-    },
-    {
-      name: 'workspace',
-      cmd: `rsync -rv --no-times --delete --exclude='skills' /root/clawd/ ${R2_MOUNT_PATH}/workspace/`,
-    },
-    {
-      name: 'skills',
-      cmd: `rsync -rv --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/`,
-    },
+    { name: 'config', sourcePath: configDir, r2Prefix: 'openclaw/', excludeDirs: [] as string[] },
+    { name: 'workspace', sourcePath: '/root/clawd', r2Prefix: 'workspace/', excludeDirs: ['skills'] },
+    { name: 'skills', sourcePath: '/root/clawd/skills', r2Prefix: 'skills/', excludeDirs: [] as string[] },
   ];
 
   try {
     for (const step of syncSteps) {
       console.log(`[sync] Starting ${step.name} sync...`);
-      const proc = await sandbox.startProcess(step.cmd);
-      await waitForProcess(proc, 30000); // 30 second timeout per step
-      const logs = await proc.getLogs();
 
-      // Check for rsync errors in stderr
-      if (logs.stderr && logs.stderr.trim().length > 0) {
-        // rsync prints some info to stderr that isn't errors (e.g., "sending incremental file list")
-        // Only treat it as a failure if the output contains actual error indicators
-        const hasError = /error|failed|denied|refused|No such file/i.test(logs.stderr);
-        if (hasError) {
-          console.error(`[sync] ${step.name} rsync error:`, logs.stderr.slice(0, 500));
-          return {
-            success: false,
-            error: `Sync failed during ${step.name}`,
-            details: logs.stderr.slice(0, 500),
-          };
+      let files;
+      try {
+        const result = await sandbox.listFiles(step.sourcePath, { recursive: true, includeHidden: true });
+        files = result.files;
+      } catch {
+        // Directory may not exist (e.g., skills/ on first run)
+        console.log(`[sync] ${step.name}: source not found, skipping`);
+        continue;
+      }
+
+      for (const file of files) {
+        if (file.type !== 'file') continue;
+        if (shouldExclude(file.name)) continue;
+
+        // Check excluded directories
+        const relPath = file.absolutePath.slice(step.sourcePath.length + 1);
+        if (step.excludeDirs.some((dir) => relPath.startsWith(dir + '/'))) continue;
+
+        const r2Key = step.r2Prefix + relPath;
+
+        const readResult = await sandbox.readFile(file.absolutePath);
+        if (!readResult.success) {
+          console.error(`[sync] Failed to read ${file.absolutePath}`);
+          continue;
+        }
+
+        if (readResult.isBinary && readResult.encoding === 'base64') {
+          // Binary file: decode base64 and upload as ArrayBuffer
+          const binaryStr = atob(readResult.content);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          await bucket.put(r2Key, bytes.buffer);
+        } else {
+          await bucket.put(r2Key, readResult.content);
         }
       }
+
       console.log(`[sync] ${step.name} sync completed`);
     }
 
     // Write sync timestamp
-    const timestampCmd = `date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
-    const timestampWriteProc = await sandbox.startProcess(timestampCmd);
-    await waitForProcess(timestampWriteProc, 5000);
+    const lastSync = new Date().toISOString();
+    await bucket.put('.last-sync', lastSync);
 
-    // Read back the timestamp to confirm
-    const timestampProc = await sandbox.startProcess(`cat ${R2_MOUNT_PATH}/.last-sync`);
-    await waitForProcess(timestampProc, 5000);
-    const timestampLogs = await timestampProc.getLogs();
-    const lastSync = timestampLogs.stdout?.trim();
-
-    if (lastSync && lastSync.match(/^\d{4}-\d{2}-\d{2}/)) {
-      console.log('[sync] Backup completed successfully at', lastSync);
-      return { success: true, lastSync };
-    } else {
-      return {
-        success: false,
-        error: 'Sync completed but timestamp verification failed',
-        details: `timestamp stdout: ${timestampLogs.stdout?.slice(0, 100) || '(empty)'}`,
-      };
-    }
+    console.log('[sync] Backup completed successfully at', lastSync);
+    return { success: true, lastSync };
   } catch (err) {
     return {
       success: false,
       error: 'Sync error',
+      details: err instanceof Error ? err.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Restore OpenClaw config and workspace from R2 to the container.
+ *
+ * Uses the R2 bucket binding directly (no s3fs FUSE mount).
+ *
+ * Restores three prefixes:
+ * - R2: openclaw/ → /root/.openclaw/
+ * - R2: workspace/ → /root/clawd/
+ * - R2: skills/ → /root/clawd/skills/
+ */
+export async function restoreFromR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncResult> {
+  const bucket = env.MOLTBOT_BUCKET;
+  if (!bucket) {
+    return { success: false, error: 'R2 storage is not configured' };
+  }
+
+  // Check if a backup exists
+  const lastSyncObj = await bucket.get('.last-sync');
+  if (!lastSyncObj) {
+    console.log('[restore] No backup found in R2, skipping restore');
+    return { success: true, details: 'No backup found' };
+  }
+  const lastSync = await lastSyncObj.text();
+
+  const restoreSteps = [
+    { r2Prefix: 'openclaw/', targetPath: '/root/.openclaw' },
+    { r2Prefix: 'workspace/', targetPath: '/root/clawd' },
+    { r2Prefix: 'skills/', targetPath: '/root/clawd/skills' },
+  ];
+
+  try {
+    for (const step of restoreSteps) {
+      console.log(`[restore] Restoring ${step.r2Prefix} to ${step.targetPath}...`);
+
+      // List all objects with this prefix (with cursor pagination)
+      let cursor: string | undefined;
+      let objectCount = 0;
+
+      do {
+        const listResult = await bucket.list({
+          prefix: step.r2Prefix,
+          ...(cursor ? { cursor } : {}),
+        });
+
+        for (const obj of listResult.objects) {
+          const relPath = obj.key.slice(step.r2Prefix.length);
+          if (!relPath) continue; // skip the prefix itself
+
+          const targetFile = `${step.targetPath}/${relPath}`;
+
+          // Ensure parent directory exists
+          const parentDir = targetFile.slice(0, targetFile.lastIndexOf('/'));
+          await sandbox.mkdir(parentDir, { recursive: true });
+
+          // Fetch the object content
+          const r2Obj = await bucket.get(obj.key);
+          if (!r2Obj) continue;
+
+          const content = await r2Obj.text();
+          await sandbox.writeFile(targetFile, content);
+          objectCount++;
+        }
+
+        cursor = listResult.truncated ? (listResult as any).cursor : undefined;
+      } while (cursor);
+
+      console.log(`[restore] Restored ${objectCount} files to ${step.targetPath}`);
+    }
+
+    console.log('[restore] Restore completed from backup at', lastSync);
+    return { success: true, lastSync };
+  } catch (err) {
+    return {
+      success: false,
+      error: 'Restore error',
       details: err instanceof Error ? err.message : 'Unknown error',
     };
   }

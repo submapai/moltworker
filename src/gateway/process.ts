@@ -2,7 +2,7 @@ import type { Sandbox, Process } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
 import { MOLTBOT_PORT, STARTUP_TIMEOUT_MS } from '../config';
 import { buildEnvVars } from './env';
-import { mountR2Storage } from './r2';
+import { restoreFromR2 } from './sync';
 
 /**
  * Find an existing OpenClaw gateway process
@@ -54,9 +54,13 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
  * @returns The running gateway process
  */
 export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): Promise<Process> {
-  // Mount R2 storage for persistent data (non-blocking if not configured)
-  // R2 is used as a backup - the startup script will restore from it on boot
-  await mountR2Storage(sandbox, env);
+  // Restore data from R2 before starting the gateway (non-blocking if not configured)
+  const restoreResult = await restoreFromR2(sandbox, env);
+  if (restoreResult.success && restoreResult.lastSync) {
+    console.log('[Gateway] Restored from R2 backup at', restoreResult.lastSync);
+  } else if (restoreResult.error) {
+    console.log('[Gateway] R2 restore skipped:', restoreResult.error);
+  }
 
   // Check if gateway is already running or starting
   const existingProcess = await findExistingMoltbotProcess(sandbox);
