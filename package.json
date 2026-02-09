@@ -1,6 +1,6 @@
 {
   "name": "moltbot-sandbox",
-  "version": "1.0.0",
+  "version": "0.8.2",
   "type": "module",
   "private": true,
   "description": "Run Moltbot personal AI assistant in a Cloudflare Sandbox",
