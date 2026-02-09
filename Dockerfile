@@ -31,8 +31,12 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
 
+# Copy Bloo.io channel plugin (registered at runtime via start-openclaw.sh config patch)
+COPY plugins/openclaw-channel-blooio/ /root/.openclaw/plugins/openclaw-channel-blooio/
+RUN cd /root/.openclaw/plugins/openclaw-channel-blooio && npm install --omit=dev 2>/dev/null || true
+
 # Copy startup script
-# Build cache bust: 2026-02-06-v29-sync-workspace
+# Build cache bust: 2026-02-09-v30-blooio-channel
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 

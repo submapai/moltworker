@@ -200,6 +200,36 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     };
 }
 
+// Bloo.io configuration (iMessage/WhatsApp via Bloo.io)
+if (process.env.BLOOIO_API_KEY) {
+    config.channels.blooio = {
+        accounts: {
+            default: {
+                enabled: true,
+                apiKey: process.env.BLOOIO_API_KEY,
+            }
+        },
+        dmPolicy: 'open',
+        allowFrom: ['*'],
+    };
+} else if (!config.channels.blooio) {
+    config.channels.blooio = {
+        enabled: false,
+    };
+}
+
+// Register Bloo.io channel plugin (copied into image by Dockerfile)
+const pluginPath = '/root/.openclaw/plugins/openclaw-channel-blooio';
+if (fs.existsSync(pluginPath + '/package.json')) {
+    config.plugins = config.plugins || {};
+    config.plugins.entries = config.plugins.entries || {};
+    config.plugins.entries['openclaw-channel-blooio'] = {
+        enabled: true,
+        source: pluginPath,
+    };
+    console.log('Registered Bloo.io channel plugin from', pluginPath);
+}
+
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration patched successfully');
 EOFPATCH

@@ -1,0 +1,9 @@
+{
+  "id": "blooio",
+  "channels": ["blooio"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {}
+  }
+}

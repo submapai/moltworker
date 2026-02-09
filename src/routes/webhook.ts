@@ -3,8 +3,6 @@ import type { AppEnv } from '../types';
 import { MOLTBOT_PORT } from '../config';
 import { ensureMoltbotGateway } from '../gateway';
 
-const BLOOIO_API_BASE = 'https://backend.blooio.com/v2/api';
-
 /**
  * Bloo.io webhook event payload
  */
@@ -65,11 +63,11 @@ async function verifySignature(
 }
 
 /**
- * Process an incoming Bloo.io message asynchronously.
+ * Dispatch an inbound Bloo.io message to the OpenClaw gateway's
+ * Bloo.io channel plugin via its registered HTTP route.
  *
- * 1. Ensure the OpenClaw gateway is running
- * 2. Forward the message to the gateway via /v1/chat/completions
- * 3. Send the AI response back via Bloo.io API
+ * The plugin handles the full channel pipeline:
+ * routing → envelope → session → agent reply → outbound delivery
  */
 async function processBlooioMessage(
   sandbox: AppEnv['Variables']['sandbox'],
@@ -77,12 +75,6 @@ async function processBlooioMessage(
   event: BlooioWebhookEvent,
 ): Promise<void> {
   const gatewayToken = env.MOLTBOT_GATEWAY_TOKEN;
-  const blooioApiKey = env.BLOOIO_API_KEY;
-
-  if (!blooioApiKey) {
-    console.error('[WEBHOOK] BLOOIO_API_KEY not configured, cannot send reply');
-    return;
-  }
 
   // 1. Ensure gateway is running
   try {
@@ -92,75 +84,41 @@ async function processBlooioMessage(
     return;
   }
 
-  // 2. Forward to OpenClaw gateway
-  let aiResponse: string;
+  // 2. Forward to the Bloo.io channel plugin's inbound HTTP route
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'x-openclaw-message-channel': 'blooio',
     };
     if (gatewayToken) {
       headers['Authorization'] = `Bearer ${gatewayToken}`;
     }
 
-    const completionResponse = await sandbox.containerFetch(
-      new Request(`http://localhost:${MOLTBOT_PORT}/v1/chat/completions`, {
+    const dispatchResponse = await sandbox.containerFetch(
+      new Request(`http://localhost:${MOLTBOT_PORT}/blooio/inbound`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          messages: [{ role: 'user', content: event.text }],
-          user: event.external_id,
+          external_id: event.external_id,
+          text: event.text,
+          message_id: event.message_id,
+          timestamp: event.timestamp,
         }),
       }),
       MOLTBOT_PORT,
     );
 
-    if (!completionResponse.ok) {
-      const errorText = await completionResponse.text();
+    if (!dispatchResponse.ok) {
+      const errorText = await dispatchResponse.text();
       console.error(
-        '[WEBHOOK] Gateway returned error:',
-        completionResponse.status,
+        '[WEBHOOK] Plugin inbound dispatch failed:',
+        dispatchResponse.status,
         errorText,
       );
-      return;
-    }
-
-    const completion = (await completionResponse.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-
-    aiResponse = completion.choices?.[0]?.message?.content || '';
-    if (!aiResponse) {
-      console.error('[WEBHOOK] Empty response from gateway');
-      return;
-    }
-  } catch (error) {
-    console.error('[WEBHOOK] Error calling gateway:', error);
-    return;
-  }
-
-  // 3. Send reply via Bloo.io API
-  try {
-    const sendResponse = await fetch(
-      `${BLOOIO_API_BASE}/chats/${encodeURIComponent(event.external_id)}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${blooioApiKey}`,
-        },
-        body: JSON.stringify({ text: aiResponse }),
-      },
-    );
-
-    if (!sendResponse.ok) {
-      const errorText = await sendResponse.text();
-      console.error('[WEBHOOK] Bloo.io send failed:', sendResponse.status, errorText);
     } else {
-      console.log('[WEBHOOK] Reply sent to', event.external_id);
+      console.log('[WEBHOOK] Message dispatched to Bloo.io channel plugin for', event.external_id);
     }
   } catch (error) {
-    console.error('[WEBHOOK] Error sending reply:', error);
+    console.error('[WEBHOOK] Error dispatching to channel plugin:', error);
   }
 }
 
