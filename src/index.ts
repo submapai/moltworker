@@ -389,11 +389,15 @@ app.all('*', async (c) => {
     });
 
     // Handle close events
+    // Valid user-settable close codes: 1000 (normal) and 3000-4999
+    const safeCloseCode = (code: number) =>
+      code === 1000 || (code >= 3000 && code <= 4999) ? code : 1000;
+
     serverWs.addEventListener('close', (event) => {
       if (debugLogs) {
         console.log('[WS] Client closed:', event.code, event.reason);
       }
-      containerWs.close(event.code, event.reason);
+      containerWs.close(safeCloseCode(event.code), event.reason);
     });
 
     containerWs.addEventListener('close', (event) => {
@@ -408,7 +412,7 @@ app.all('*', async (c) => {
       if (debugLogs) {
         console.log('[WS] Transformed close reason:', reason);
       }
-      serverWs.close(event.code, reason);
+      serverWs.close(safeCloseCode(event.code), reason);
     });
 
     // Handle errors
