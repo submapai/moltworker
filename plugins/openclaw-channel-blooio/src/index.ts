@@ -171,6 +171,39 @@ const blooioChannel = {
 
   reload: { configPrefixes: ['channels.blooio'] },
 
+  configSchema: {
+    type: 'object',
+    properties: {
+      enabled: { type: 'boolean', title: 'Enabled', default: false },
+      accounts: {
+        type: 'object',
+        title: 'Accounts',
+        additionalProperties: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean', title: 'Enabled', default: true },
+            apiKey: { type: 'string', title: 'API Key', description: 'Bloo.io API key for sending messages' },
+          },
+          required: ['apiKey'],
+        },
+      },
+      dmPolicy: {
+        type: 'string',
+        title: 'DM Policy',
+        enum: ['open', 'pairing'],
+        default: 'open',
+        description: 'Who can send direct messages',
+      },
+      allowFrom: {
+        type: 'array',
+        title: 'Allow From',
+        items: { type: 'string' },
+        default: ['*'],
+        description: 'List of allowed sender IDs (* for all)',
+      },
+    },
+  },
+
   config: {
     listAccountIds: (cfg: any): string[] => {
       const channelCfg = cfg?.channels?.blooio;

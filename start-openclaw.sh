@@ -203,6 +203,7 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
 // Bloo.io configuration (iMessage/WhatsApp via Bloo.io)
 if (process.env.BLOOIO_API_KEY) {
     config.channels.blooio = {
+        enabled: true,
         accounts: {
             default: {
                 enabled: true,
