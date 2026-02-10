@@ -174,7 +174,7 @@ const blooioChannel = {
   configSchema: {
     type: 'object',
     properties: {
-      enabled: { type: 'boolean', title: 'Enabled', default: false },
+      enabled: { type: 'boolean', title: 'Enabled', default: true },
       accounts: {
         type: 'object',
         title: 'Accounts',
