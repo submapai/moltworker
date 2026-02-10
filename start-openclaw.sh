@@ -206,6 +206,7 @@ if (process.env.BLOOIO_API_KEY) {
     config.channels.blooio = {
         apiKey: process.env.BLOOIO_API_KEY,
         enabled: true,
+        outbound: true,
         dmPolicy: 'open',
         groupPolicy: 'open',
         allowFrom: ['*'],
