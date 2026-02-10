@@ -50,7 +50,6 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
   if (env.BLOOIO_API_KEY) envVars.BLOOIO_API_KEY = env.BLOOIO_API_KEY;
-  if (env.BLOOIO_WEBHOOK_SECRET) envVars.BLOOIO_WEBHOOK_SECRET = env.BLOOIO_WEBHOOK_SECRET;
 
   return envVars;
 }

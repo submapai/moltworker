@@ -1,4 +1,9 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
 const BLOOIO_API_BASE = 'https://backend.blooio.com/v2/api';
+
+/** Maximum allowed age (in seconds) for a webhook signature timestamp */
+const SIGNATURE_MAX_AGE_SEC = 300;
 
 let pluginRuntime: any = null;
 
@@ -145,6 +150,34 @@ async function handleInboundMessage(opts: {
       },
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// HMAC-SHA256 webhook signature verification
+// ---------------------------------------------------------------------------
+
+function parseSignatureHeader(header: string): { timestampSec: number | null; signatures: string[] } {
+  const parts = header.split(',').map((p) => p.trim()).filter(Boolean);
+  const tPart = parts.find((p) => p.startsWith('t='));
+  const sigParts = parts.filter((p) => p.startsWith('v1='));
+  if (!tPart || sigParts.length === 0) return { timestampSec: null, signatures: [] };
+  const ts = Number(tPart.slice(2));
+  return { timestampSec: Number.isFinite(ts) ? ts : null, signatures: sigParts.map((p) => p.slice(3)) };
+}
+
+function verifySignature(signatureHeader: string, rawBody: string, secret: string): { valid: boolean; timestampSec: number | null } {
+  const { timestampSec, signatures } = parseSignatureHeader(signatureHeader);
+  if (!timestampSec || signatures.length === 0) return { valid: false, timestampSec: null };
+
+  const expected = createHmac('sha256', secret).update(`${timestampSec}.${rawBody}`).digest('hex');
+  for (const candidate of signatures) {
+    const a = Buffer.from(expected, 'hex');
+    const b = Buffer.from(candidate.toLowerCase(), 'hex');
+    if (a.length === b.length && timingSafeEqual(a, b)) {
+      return { valid: true, timestampSec };
+    }
+  }
+  return { valid: false, timestampSec };
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +411,30 @@ export default function register(api: any) {
     path: routePath,
     handler: async (req: any, res: any) => {
       try {
+        const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+
+        // HMAC signature verification
+        const webhookSecret = process.env.BLOOIO_WEBHOOK_SECRET;
+        if (webhookSecret) {
+          const signature = req.headers?.['x-blooio-signature'];
+          if (!signature) {
+            res.status(401).json({ error: 'Missing signature' });
+            return;
+          }
+          const { valid, timestampSec } = verifySignature(signature, rawBody, webhookSecret);
+          if (!valid) {
+            res.status(401).json({ error: 'Invalid signature' });
+            return;
+          }
+          if (typeof timestampSec === 'number') {
+            const nowSec = Math.floor(Date.now() / 1000);
+            if (Math.abs(nowSec - timestampSec) > SIGNATURE_MAX_AGE_SEC) {
+              res.status(401).json({ error: 'Stale signature' });
+              return;
+            }
+          }
+        }
+
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
         const { external_id, text, message_id, timestamp, is_group, group_id, sender } = body;
 
