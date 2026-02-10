@@ -212,7 +212,7 @@ if (process.env.BLOOIO_API_KEY) {
         dmPolicy: 'open',
         allowFrom: ['*'],
     };
-} else if (!config.channels.blooio) {
+} else {
     config.channels.blooio = {
         enabled: false,
     };
@@ -222,11 +222,24 @@ if (process.env.BLOOIO_API_KEY) {
 const pluginPath = '/root/.openclaw/plugins/openclaw-channel-blooio';
 if (fs.existsSync(pluginPath + '/package.json')) {
     config.plugins = config.plugins || {};
+
+    // Add plugin load path
+    config.plugins.load = config.plugins.load || {};
+    config.plugins.load.paths = config.plugins.load.paths || [];
+    if (!config.plugins.load.paths.includes(pluginPath)) {
+        config.plugins.load.paths.push(pluginPath);
+    }
+    // Dedup plugin load paths (stale R2 backups may have duplicates)
+    config.plugins.load.paths = [...new Set(config.plugins.load.paths)];
+
+    // Enable plugin entry using the plugin ID from openclaw.plugin.json
     config.plugins.entries = config.plugins.entries || {};
-    config.plugins.entries['openclaw-channel-blooio'] = {
+    // Clean up stale entry from older config (R2 backup may have bad keys)
+    delete config.plugins.entries['openclaw-channel-blooio'];
+    config.plugins.entries['blooio'] = {
         enabled: true,
-        source: pluginPath,
     };
+
     console.log('Registered Bloo.io channel plugin from', pluginPath);
 }
 

@@ -144,6 +144,29 @@ describe('buildEnvVars', () => {
     expect(result.CF_ACCOUNT_ID).toBe('acct-123');
   });
 
+  // Bloo.io channel tokens
+  it('includes BLOOIO_API_KEY when set', () => {
+    const env = createMockEnv({ BLOOIO_API_KEY: 'bloo-key-123' });
+    const result = buildEnvVars(env);
+    expect(result.BLOOIO_API_KEY).toBe('bloo-key-123');
+  });
+
+  it('includes BLOOIO_WEBHOOK_SECRET when set', () => {
+    const env = createMockEnv({ BLOOIO_WEBHOOK_SECRET: 'whsec-abc' });
+    const result = buildEnvVars(env);
+    expect(result.BLOOIO_WEBHOOK_SECRET).toBe('whsec-abc');
+  });
+
+  it('includes both Bloo.io vars together', () => {
+    const env = createMockEnv({
+      BLOOIO_API_KEY: 'bloo-key',
+      BLOOIO_WEBHOOK_SECRET: 'whsec-xyz',
+    });
+    const result = buildEnvVars(env);
+    expect(result.BLOOIO_API_KEY).toBe('bloo-key');
+    expect(result.BLOOIO_WEBHOOK_SECRET).toBe('whsec-xyz');
+  });
+
   it('combines all env vars correctly', () => {
     const env = createMockEnv({
       ANTHROPIC_API_KEY: 'sk-key',

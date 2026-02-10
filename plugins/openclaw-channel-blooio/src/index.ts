@@ -33,18 +33,25 @@ async function handleInboundMessage(opts: {
   text: string;
   messageId: string;
   timestamp: string;
+  isGroup?: boolean;
+  groupId?: string | null;
   log?: any;
 }): Promise<void> {
-  const { cfg, accountId, externalId, text, messageId, timestamp, log } = opts;
+  const { cfg, accountId, externalId, text, messageId, timestamp, isGroup, groupId, log } = opts;
   const rt = getRuntime();
+
+  const chatType = isGroup ? 'group' : 'direct';
+  const peerId = isGroup && groupId ? groupId : externalId;
 
   // 1. Route: determine which agent handles this conversation
   const route = rt.channel.routing.resolveAgentRoute({
     cfg,
     channel: 'blooio',
     accountId,
-    peer: { kind: 'dm', id: externalId },
+    peer: { kind: isGroup ? 'group' : 'dm', id: peerId },
   });
+
+  log?.debug?.(`Bloo.io route resolved: agent=${route.agentId} session=${route.sessionKey} chatType=${chatType}`);
 
   // 2. Resolve session store path
   const storePath = rt.channel.session.resolveStorePath(cfg.session?.store, {
@@ -60,13 +67,13 @@ async function handleInboundMessage(opts: {
     from: externalId,
     timestamp,
     body: text,
-    chatType: 'direct',
+    chatType,
     sender: { name: externalId, id: externalId },
     envelope: envelopeOptions,
   });
 
   // 5. Finalize inbound context
-  const to = `blooio:${externalId}`;
+  const to = `blooio:${peerId}`;
   const ctx = rt.channel.reply.finalizeInboundContext({
     Body: body,
     RawBody: text,
@@ -75,7 +82,7 @@ async function handleInboundMessage(opts: {
     To: to,
     SessionKey: route.sessionKey,
     AccountId: accountId,
-    ChatType: 'direct',
+    ChatType: chatType,
     ConversationLabel: externalId,
     SenderName: externalId,
     SenderId: externalId,
@@ -153,8 +160,8 @@ const blooioChannel = {
   },
 
   capabilities: {
-    chatTypes: ['direct'],
-    reactions: false,
+    chatTypes: ['direct', 'group'],
+    reactions: true,
     threads: false,
     media: false,
     nativeCommands: false,
@@ -301,22 +308,37 @@ export default function register(api: any) {
   api.logger.info('Bloo.io channel plugin loaded');
   api.registerChannel({ plugin: blooioChannel });
 
+  const routePath = '/blooio/inbound';
+  api.logger.info(`Bloo.io registering HTTP route: POST ${routePath}`);
+
   // Register HTTP route for inbound webhook messages forwarded by the moltworker
   api.registerHttpRoute({
     method: 'POST',
-    path: '/blooio/inbound',
+    path: routePath,
     handler: async (req: any, res: any) => {
       try {
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-        const { external_id, text, message_id, timestamp } = body;
+        const { external_id, text, message_id, timestamp, is_group, group_id } = body;
 
-        if (!external_id || !text) {
-          res.status(400).json({ error: 'Missing external_id or text' });
+        // Validate required fields are strings (not just truthy)
+        if (typeof external_id !== 'string' || !external_id) {
+          res.status(400).json({ error: 'external_id must be a non-empty string' });
+          return;
+        }
+        if (typeof text !== 'string' || !text) {
+          res.status(400).json({ error: 'text must be a non-empty string' });
           return;
         }
 
         const cfg = api.getConfig();
         const accountId = 'default';
+
+        const account = getAccountConfig(cfg, accountId);
+        if (!account) {
+          api.logger.warn('Bloo.io getAccountConfig returned null for account:', accountId);
+          res.status(503).json({ error: 'Bloo.io channel not configured' });
+          return;
+        }
 
         // Dispatch asynchronously so the webhook gets a fast response
         handleInboundMessage({
@@ -326,6 +348,8 @@ export default function register(api: any) {
           text,
           messageId: message_id || '',
           timestamp: timestamp || new Date().toISOString(),
+          isGroup: is_group || false,
+          groupId: group_id || null,
           log: api.logger,
         }).catch((err: any) => {
           api.logger.error(`Bloo.io inbound dispatch error: ${err.message}`);

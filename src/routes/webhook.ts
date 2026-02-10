@@ -19,24 +19,30 @@ interface BlooioWebhookEvent {
   group_id?: string;
 }
 
+/** Maximum allowed age (in seconds) for a webhook signature timestamp */
+const SIGNATURE_MAX_AGE_SEC = 300;
+
 /**
  * Verify Bloo.io HMAC-SHA256 webhook signature.
  *
  * Header format: `t=<timestamp>,v1=<hex_signature>`
  * Signed payload: `<timestamp>.<raw_body>`
+ *
+ * Returns `{ valid, timestampSec }` so callers can perform replay-protection.
  */
 async function verifySignature(
   signatureHeader: string,
   rawBody: string,
   secret: string,
-): Promise<boolean> {
+): Promise<{ valid: boolean; timestampSec: number }> {
   const parts = signatureHeader.split(',');
   const timestampPart = parts.find((p) => p.startsWith('t='));
   const signaturePart = parts.find((p) => p.startsWith('v1='));
 
-  if (!timestampPart || !signaturePart) return false;
+  if (!timestampPart || !signaturePart) return { valid: false, timestampSec: 0 };
 
   const timestamp = timestampPart.slice(2);
+  const timestampSec = Number(timestamp);
   const expectedSig = signaturePart.slice(3);
 
   const payload = `${timestamp}.${rawBody}`;
@@ -54,12 +60,12 @@ async function verifySignature(
     .join('');
 
   // Constant-time comparison
-  if (hexSig.length !== expectedSig.length) return false;
+  if (hexSig.length !== expectedSig.length) return { valid: false, timestampSec };
   let result = 0;
   for (let i = 0; i < hexSig.length; i++) {
     result |= hexSig.charCodeAt(i) ^ expectedSig.charCodeAt(i);
   }
-  return result === 0;
+  return { valid: result === 0, timestampSec };
 }
 
 /**
@@ -102,6 +108,10 @@ async function processBlooioMessage(
           text: event.text,
           message_id: event.message_id,
           timestamp: event.timestamp,
+          attachments: event.attachments || [],
+          is_group: event.is_group || false,
+          group_id: event.group_id || null,
+          protocol: event.protocol || '',
         }),
       }),
       MOLTBOT_PORT,
@@ -140,10 +150,17 @@ webhook.post('/blooio', async (c) => {
       return c.json({ error: 'Missing signature' }, 401);
     }
 
-    const valid = await verifySignature(signature, rawBody, webhookSecret);
+    const { valid, timestampSec } = await verifySignature(signature, rawBody, webhookSecret);
     if (!valid) {
       console.error('[WEBHOOK] Invalid webhook signature');
       return c.json({ error: 'Invalid signature' }, 401);
+    }
+
+    // Replay protection: reject signatures older than 5 minutes
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSec - timestampSec) > SIGNATURE_MAX_AGE_SEC) {
+      console.error('[WEBHOOK] Stale signature, age:', Math.abs(nowSec - timestampSec), 'seconds');
+      return c.json({ error: 'Stale signature' }, 401);
     }
   }
 
