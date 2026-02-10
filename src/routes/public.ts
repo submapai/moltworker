@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { MOLTBOT_PORT } from '../config';
-import { findExistingMoltbotProcess } from '../gateway';
+import { findExistingMoltbotProcess, getProcessListHealth } from '../gateway';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
@@ -37,6 +37,10 @@ publicRoutes.get('/api/status', async (c) => {
   try {
     const process = await findExistingMoltbotProcess(sandbox);
     if (!process) {
+      const { lastError, lastErrorAt } = getProcessListHealth();
+      if (lastError && Date.now() - lastErrorAt < 15000) {
+        return c.json({ ok: false, status: 'busy', error: lastError });
+      }
       return c.json({ ok: false, status: 'not_running' });
     }
 

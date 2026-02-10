@@ -466,22 +466,26 @@ async function scheduled(
   env: MoltbotEnv,
   _ctx: ExecutionContext,
 ): Promise<void> {
-  const options = buildSandboxOptions(env);
-  const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
+  try {
+    const options = buildSandboxOptions(env);
+    const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
 
-  const gatewayProcess = await findExistingMoltbotProcess(sandbox);
-  if (!gatewayProcess) {
-    console.log('[cron] Gateway not running yet, skipping sync');
-    return;
-  }
+    const gatewayProcess = await findExistingMoltbotProcess(sandbox);
+    if (!gatewayProcess) {
+      console.log('[cron] Gateway not running yet, skipping sync');
+      return;
+    }
 
-  console.log('[cron] Starting backup sync to R2...');
-  const result = await syncToR2(sandbox, env);
+    console.log('[cron] Starting backup sync to R2...');
+    const result = await syncToR2(sandbox, env);
 
-  if (result.success) {
-    console.log('[cron] Backup sync completed successfully at', result.lastSync);
-  } else {
-    console.error('[cron] Backup sync failed:', result.error, result.details || '');
+    if (result.success) {
+      console.log('[cron] Backup sync completed successfully at', result.lastSync);
+    } else {
+      console.error('[cron] Backup sync failed:', result.error, result.details || '');
+    }
+  } catch (error) {
+    console.error('[cron] Alarm handler failed:', error);
   }
 }
 

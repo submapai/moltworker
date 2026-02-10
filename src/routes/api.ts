@@ -7,9 +7,25 @@ import {
   syncToR2,
   waitForProcess,
 } from '../gateway';
+import type { Process } from '@cloudflare/sandbox';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
+
+/** Run a CLI process, wait for it, get logs, then kill it to prevent zombies */
+async function runCliProcess(proc: Process, timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
+  try {
+    await waitForProcess(proc, timeoutMs);
+    const logs = await proc.getLogs();
+    return { stdout: logs.stdout || '', stderr: logs.stderr || '' };
+  } finally {
+    try {
+      await proc.kill();
+    } catch {
+      // Process may have already exited
+    }
+  }
+}
 
 /**
  * API routes
@@ -42,11 +58,7 @@ adminApi.get('/devices', async (c) => {
     const proc = await sandbox.startProcess(
       `openclaw devices list --json --url ws://localhost:18789${tokenArg}`,
     );
-    await waitForProcess(proc, CLI_TIMEOUT_MS);
-
-    const logs = await proc.getLogs();
-    const stdout = logs.stdout || '';
-    const stderr = logs.stderr || '';
+    const { stdout, stderr } = await runCliProcess(proc, CLI_TIMEOUT_MS);
 
     // Try to parse JSON output
     try {
@@ -98,11 +110,7 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     const proc = await sandbox.startProcess(
       `openclaw devices approve ${requestId} --url ws://localhost:18789${tokenArg}`,
     );
-    await waitForProcess(proc, CLI_TIMEOUT_MS);
-
-    const logs = await proc.getLogs();
-    const stdout = logs.stdout || '';
-    const stderr = logs.stderr || '';
+    const { stdout, stderr } = await runCliProcess(proc, CLI_TIMEOUT_MS);
 
     // Check for success indicators (case-insensitive, CLI outputs "Approved ...")
     const success = stdout.toLowerCase().includes('approved') || proc.exitCode === 0;
@@ -134,10 +142,7 @@ adminApi.post('/devices/approve-all', async (c) => {
     const listProc = await sandbox.startProcess(
       `openclaw devices list --json --url ws://localhost:18789${tokenArg}`,
     );
-    await waitForProcess(listProc, CLI_TIMEOUT_MS);
-
-    const listLogs = await listProc.getLogs();
-    const stdout = listLogs.stdout || '';
+    const { stdout } = await runCliProcess(listProc, CLI_TIMEOUT_MS);
 
     // Parse pending devices
     let pending: Array<{ requestId: string }> = [];
@@ -165,10 +170,7 @@ adminApi.post('/devices/approve-all', async (c) => {
           `openclaw devices approve ${device.requestId} --url ws://localhost:18789${tokenArg}`,
         );
         // eslint-disable-next-line no-await-in-loop
-        await waitForProcess(approveProc, CLI_TIMEOUT_MS);
-
-        // eslint-disable-next-line no-await-in-loop
-        const approveLogs = await approveProc.getLogs();
+        const approveLogs = await runCliProcess(approveProc, CLI_TIMEOUT_MS);
         const success =
           approveLogs.stdout?.toLowerCase().includes('approved') || approveProc.exitCode === 0;
 

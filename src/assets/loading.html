@@ -157,6 +157,8 @@
       let pollCount = 0;
       let consecutiveErrors = 0;
       const maxConsecutiveErrors = 5;
+      let pollDelayMs = 2000;
+      const maxPollDelayMs = 15000;
 
       async function checkStatus() {
         pollCount++;
@@ -188,8 +190,10 @@
             statusEl.textContent = 'Checking status... (poll #' + pollCount + ')';
           }
 
-          // Continue polling
-          setTimeout(checkStatus, 2000);
+          // Continue polling with backoff + jitter
+          const jitter = Math.floor(Math.random() * 300);
+          setTimeout(checkStatus, pollDelayMs + jitter);
+          pollDelayMs = Math.min(Math.round(pollDelayMs * 1.5), maxPollDelayMs);
         } catch (err) {
           consecutiveErrors++;
 
@@ -200,7 +204,9 @@
           } else {
             statusEl.textContent =
               'Retrying... (' + consecutiveErrors + '/' + maxConsecutiveErrors + ')';
-            setTimeout(checkStatus, 3000);
+            const jitter = Math.floor(Math.random() * 300);
+            setTimeout(checkStatus, pollDelayMs + jitter);
+            pollDelayMs = Math.min(Math.round(pollDelayMs * 1.5), maxPollDelayMs);
           }
         }
       }
