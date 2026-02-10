@@ -206,6 +206,8 @@ These are the env vars passed TO the container (internal names):
 | `DISCORD_BOT_TOKEN` | `channels.discord.token` | |
 | `SLACK_BOT_TOKEN` | `channels.slack.botToken` | |
 | `SLACK_APP_TOKEN` | `channels.slack.appToken` | |
+| `BLOOIO_API_KEY` | `channels.blooio.accounts.default.apiKey` | Enables Bloo.io channel |
+| `BLOOIO_WEBHOOK_SECRET` | (worker env) | Used to verify Bloo.io webhooks |
 
 ## OpenClaw Config Schema
 

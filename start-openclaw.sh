@@ -201,19 +201,26 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
 }
 
 // Bloo.io configuration (iMessage/WhatsApp via Bloo.io)
-if (process.env.BLOOIO_API_KEY) {
-    config.channels.blooio = {
-        enabled: true,
-        accounts: {
-            default: {
-                enabled: true,
-                apiKey: process.env.BLOOIO_API_KEY,
-            }
-        },
-        dmPolicy: 'open',
-        allowFrom: ['*'],
+const hasBlooioKey = !!process.env.BLOOIO_API_KEY;
+if (hasBlooioKey) {
+    config.channels.blooio = config.channels.blooio || {};
+    config.channels.blooio.enabled = true;
+    config.channels.blooio.accounts = config.channels.blooio.accounts || {};
+
+    const existingDefault = config.channels.blooio.accounts.default || {};
+    config.channels.blooio.accounts.default = {
+        ...existingDefault,
+        enabled: existingDefault.enabled !== false,
+        apiKey: process.env.BLOOIO_API_KEY,
     };
-} else {
+
+    if (!config.channels.blooio.dmPolicy) {
+        config.channels.blooio.dmPolicy = 'open';
+    }
+    if (!config.channels.blooio.allowFrom) {
+        config.channels.blooio.allowFrom = ['*'];
+    }
+} else if (!config.channels.blooio) {
     config.channels.blooio = {
         enabled: false,
     };

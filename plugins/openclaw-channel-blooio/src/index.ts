@@ -122,8 +122,9 @@ async function handleInboundMessage(opts: {
         if (!textToSend || !apiKey) return;
 
         try {
+          const replyTarget = externalId.replace(/^(blooio|bloo|imessage):/i, '');
           const response = await fetch(
-            `${BLOOIO_API_BASE}/chats/${encodeURIComponent(externalId)}/messages`,
+            `${BLOOIO_API_BASE}/chats/${encodeURIComponent(replyTarget)}/messages`,
             {
               method: 'POST',
               headers: {
@@ -138,7 +139,7 @@ async function handleInboundMessage(opts: {
             const errorText = await response.text();
             log?.error?.(`Bloo.io send failed: ${response.status} ${errorText}`);
           } else {
-            log?.info?.(`Bloo.io reply sent to ${externalId}`);
+            log?.info?.(`Bloo.io reply sent to ${replyTarget}`);
           }
         } catch (err: any) {
           log?.error?.(`Bloo.io send error: ${err.message}`);
@@ -248,7 +249,7 @@ const blooioChannel = {
 
   messaging: {
     normalizeTarget: ({ target }: any) =>
-      target ? { targetId: target.replace(/^(blooio|bloo):/i, '') } : null,
+      target ? { targetId: target.replace(/^(blooio|bloo|imessage):/i, '') } : null,
     targetResolver: {
       looksLikeId: (id: string): boolean => /^[\w+\-.@]+$/.test(id),
       hint: '<phone-or-chat-id>',
@@ -275,9 +276,11 @@ const blooioChannel = {
         return { ok: false, error: 'BLOOIO_API_KEY not configured' };
       }
 
+      const normalizedTo = to.replace(/^(blooio|bloo|imessage):/i, '');
+
       try {
         const response = await fetch(
-          `${BLOOIO_API_BASE}/chats/${encodeURIComponent(to)}/messages`,
+          `${BLOOIO_API_BASE}/chats/${encodeURIComponent(normalizedTo)}/messages`,
           {
             method: 'POST',
             headers: {
@@ -295,7 +298,7 @@ const blooioChannel = {
         }
 
         const data = await response.json();
-        log?.info?.(`Bloo.io message sent to ${to}`);
+        log?.info?.(`Bloo.io message sent to ${normalizedTo}`);
         return { ok: true, via: 'blooio', messageId: data?.id || '', data };
       } catch (err: any) {
         log?.error?.(`Bloo.io send error: ${err.message}`);
@@ -351,7 +354,7 @@ export default function register(api: any) {
     handler: async (req: any, res: any) => {
       try {
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-        const { external_id, text, message_id, timestamp, is_group, group_id } = body;
+        const { external_id, text, message_id, timestamp, is_group, group_id, sender } = body;
 
         // Validate required fields are strings (not just truthy)
         if (typeof external_id !== 'string' || !external_id) {
@@ -365,6 +368,18 @@ export default function register(api: any) {
 
         const cfg = api.getConfig();
         const accountId = 'default';
+        const resolvedSender =
+          typeof sender === 'string' && sender.trim().length > 0 ? sender.trim() : external_id;
+
+        let normalizedTimestamp = new Date().toISOString();
+        if (typeof timestamp === 'number') {
+          normalizedTimestamp = new Date(timestamp).toISOString();
+        } else if (typeof timestamp === 'string' && timestamp) {
+          const parsed = Date.parse(timestamp);
+          normalizedTimestamp = Number.isNaN(parsed)
+            ? timestamp
+            : new Date(parsed).toISOString();
+        }
 
         const account = getAccountConfig(cfg, accountId);
         if (!account) {
@@ -377,10 +392,10 @@ export default function register(api: any) {
         handleInboundMessage({
           cfg,
           accountId,
-          externalId: external_id,
+          externalId: (is_group ? resolvedSender : external_id) || external_id,
           text,
           messageId: message_id || '',
-          timestamp: timestamp || new Date().toISOString(),
+          timestamp: normalizedTimestamp,
           isGroup: is_group || false,
           groupId: group_id || null,
           log: api.logger,
