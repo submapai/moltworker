@@ -7,24 +7,22 @@ function getRuntime(): any {
   return pluginRuntime;
 }
 
-function getAccountConfig(cfg: any, accountId?: string) {
-  const channelCfg = cfg?.channels?.blooio;
-  if (!channelCfg) return null;
+function getChannelConfig(cfg: any) {
+  return cfg?.channels?.blooio || null;
+}
 
-  if (accountId && channelCfg.accounts?.[accountId]) {
-    return channelCfg.accounts[accountId];
-  }
-
-  if (channelCfg.accounts?.default) {
-    return channelCfg.accounts.default;
-  }
-
-  return channelCfg;
+/**
+ * Strip channel prefix from a target ID.
+ * Bloo.io chat IDs are E.164 phone numbers (+15551234567),
+ * email addresses, or group IDs (grp_xxxx).
+ */
+function normalizeChatId(raw: string): string {
+  return raw.replace(/^blooio:/i, '');
 }
 
 /**
  * Handle an inbound Bloo.io message by dispatching through the
- * OpenClaw channel pipeline (routing → envelope → session → agent reply).
+ * OpenClaw channel pipeline (routing -> envelope -> session -> agent reply).
  */
 async function handleInboundMessage(opts: {
   cfg: any;
@@ -109,8 +107,8 @@ async function handleInboundMessage(opts: {
   });
 
   // 7. Dispatch reply — triggers agent run and delivers via outbound.sendText
-  const account = getAccountConfig(cfg, accountId);
-  const apiKey = account?.apiKey;
+  const channelCfg = getChannelConfig(cfg);
+  const apiKey = channelCfg?.apiKey;
 
   await rt.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
     ctx,
@@ -122,9 +120,9 @@ async function handleInboundMessage(opts: {
         if (!textToSend || !apiKey) return;
 
         try {
-          const replyTarget = externalId.replace(/^(blooio|bloo|imessage):/i, '');
+          const chatId = normalizeChatId(externalId);
           const response = await fetch(
-            `${BLOOIO_API_BASE}/chats/${encodeURIComponent(replyTarget)}/messages`,
+            `${BLOOIO_API_BASE}/chats/${encodeURIComponent(chatId)}/messages`,
             {
               method: 'POST',
               headers: {
@@ -139,7 +137,7 @@ async function handleInboundMessage(opts: {
             const errorText = await response.text();
             log?.error?.(`Bloo.io send failed: ${response.status} ${errorText}`);
           } else {
-            log?.info?.(`Bloo.io reply sent to ${replyTarget}`);
+            log?.info?.(`Bloo.io reply sent to ${chatId}`);
           }
         } catch (err: any) {
           log?.error?.(`Bloo.io send error: ${err.message}`);
@@ -148,6 +146,10 @@ async function handleInboundMessage(opts: {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Channel definition — modeled after BlueBubbles (webhook-based channel)
+// ---------------------------------------------------------------------------
 
 const blooioChannel = {
   id: 'blooio',
@@ -164,7 +166,7 @@ const blooioChannel = {
     chatTypes: ['direct', 'group'],
     reactions: true,
     threads: false,
-    media: false,
+    media: true,
     nativeCommands: false,
     blockStreaming: false,
     outbound: true,
@@ -172,54 +174,66 @@ const blooioChannel = {
 
   reload: { configPrefixes: ['channels.blooio'] },
 
+  // Config schema mirrors BlueBubbles: flat with dm + group policies
   configSchema: {
     type: 'object',
     properties: {
       enabled: { type: 'boolean', title: 'Enabled', default: true },
-      accounts: {
-        type: 'object',
-        title: 'Accounts',
-        additionalProperties: {
-          type: 'object',
-          properties: {
-            enabled: { type: 'boolean', title: 'Enabled', default: true },
-            apiKey: { type: 'string', title: 'API Key', description: 'Bloo.io API key for sending messages' },
-          },
-          required: ['apiKey'],
-        },
-      },
+      apiKey: { type: 'string', title: 'API Key', description: 'Bloo.io Bearer API key' },
       dmPolicy: {
         type: 'string',
         title: 'DM Policy',
-        enum: ['open', 'pairing'],
+        enum: ['open', 'pairing', 'allowlist', 'disabled'],
         default: 'open',
         description: 'Who can send direct messages',
       },
+      groupPolicy: {
+        type: 'string',
+        title: 'Group Policy',
+        enum: ['open', 'allowlist', 'disabled'],
+        default: 'open',
+        description: 'Who can interact in group chats',
+      },
       allowFrom: {
         type: 'array',
-        title: 'Allow From',
+        title: 'DM Allow From',
         items: { type: 'string' },
         default: ['*'],
-        description: 'List of allowed sender IDs (* for all)',
+        description: 'Allowed sender IDs for DMs (* for all). E.164 phone or email.',
+      },
+      groupAllowFrom: {
+        type: 'array',
+        title: 'Group Allow From',
+        items: { type: 'string' },
+        default: ['*'],
+        description: 'Allowed sender IDs for groups (* for all)',
+      },
+      blockStreaming: {
+        type: 'boolean',
+        title: 'Block Streaming',
+        default: false,
+        description: 'Send complete response as single message instead of streaming chunks',
+      },
+      textChunkLimit: {
+        type: 'number',
+        title: 'Text Chunk Limit',
+        default: 4000,
+        description: 'Max characters per outbound message',
       },
     },
+    required: ['apiKey'],
   },
 
   config: {
-    listAccountIds: (cfg: any): string[] => {
-      const channelCfg = cfg?.channels?.blooio;
-      return channelCfg?.accounts && Object.keys(channelCfg.accounts).length > 0
-        ? Object.keys(channelCfg.accounts)
-        : ['default'];
-    },
+    listAccountIds: (): string[] => ['default'],
 
     resolveAccount: (cfg: any, accountId?: string) => {
       const channelCfg = cfg?.channels?.blooio;
-      const id = accountId || 'default';
-      const account = channelCfg?.accounts?.[id];
-      return account
-        ? { accountId: id, config: account, enabled: account.enabled !== false }
-        : { accountId: 'default', config: channelCfg, enabled: channelCfg?.enabled !== false };
+      return {
+        accountId: accountId || 'default',
+        config: channelCfg,
+        enabled: channelCfg?.enabled !== false,
+      };
     },
 
     defaultAccountId: (): string => 'default',
@@ -242,17 +256,24 @@ const blooioChannel = {
       allowFrom: account.config?.allowFrom || ['*'],
       policyPath: 'channels.blooio.dmPolicy',
       allowFromPath: 'channels.blooio.allowFrom',
-      approveHint: 'Use /allow blooio:<userId> to approve',
-      normalizeEntry: (raw: string) => raw.replace(/^(blooio|bloo|imessage):/i, ''),
+      approveHint: 'Use /allow blooio:<phone-or-email> to approve',
+      normalizeEntry: (raw: string) => normalizeChatId(raw),
+    }),
+    resolveGroupPolicy: ({ account }: any) => ({
+      policy: account.config?.groupPolicy || 'open',
+      allowFrom: account.config?.groupAllowFrom || ['*'],
+      policyPath: 'channels.blooio.groupPolicy',
+      allowFromPath: 'channels.blooio.groupAllowFrom',
     }),
   },
 
   messaging: {
+    // Chat IDs: E.164 phone (+15551234567), email, or group ID (grp_xxxx)
     normalizeTarget: ({ target }: any) =>
-      target ? { targetId: target.replace(/^(blooio|bloo|imessage):/i, '') } : null,
+      target ? { targetId: normalizeChatId(target) } : null,
     targetResolver: {
-      looksLikeId: (id: string): boolean => /^[\w+\-.@]+$/.test(id),
-      hint: '<phone-or-chat-id>',
+      looksLikeId: (id: string): boolean => /^[+\w.\-@]+$/.test(id),
+      hint: '<+phone | email | grp_xxxx>',
     },
   },
 
@@ -262,25 +283,25 @@ const blooioChannel = {
     resolveTarget: ({ to }: any) => {
       const trimmed = to?.trim();
       if (!trimmed) {
-        return { ok: false, error: new Error('Requires --to <chatId>') };
+        return { ok: false, error: new Error('Requires --to <+phone | email | grp_xxxx>') };
       }
       return { ok: true, to: trimmed };
     },
 
-    sendText: async ({ cfg, to, text, accountId, log }: any) => {
-      const account = getAccountConfig(cfg, accountId);
-      const apiKey = account?.apiKey;
+    sendText: async ({ cfg, to, text, log }: any) => {
+      const channelCfg = getChannelConfig(cfg);
+      const apiKey = channelCfg?.apiKey;
 
       if (!apiKey) {
         log?.error?.('Bloo.io API key not configured');
         return { ok: false, error: 'BLOOIO_API_KEY not configured' };
       }
 
-      const normalizedTo = to.replace(/^(blooio|bloo|imessage):/i, '');
+      const chatId = normalizeChatId(to);
 
       try {
         const response = await fetch(
-          `${BLOOIO_API_BASE}/chats/${encodeURIComponent(normalizedTo)}/messages`,
+          `${BLOOIO_API_BASE}/chats/${encodeURIComponent(chatId)}/messages`,
           {
             method: 'POST',
             headers: {
@@ -298,8 +319,8 @@ const blooioChannel = {
         }
 
         const data = await response.json();
-        log?.info?.(`Bloo.io message sent to ${normalizedTo}`);
-        return { ok: true, via: 'blooio', messageId: data?.id || '', data };
+        log?.info?.(`Bloo.io message sent to ${chatId}`);
+        return { ok: true, via: 'blooio', messageId: data?.message_id || '', data };
       } catch (err: any) {
         log?.error?.(`Bloo.io send error: ${err.message}`);
         return { ok: false, error: err.message };
@@ -309,9 +330,9 @@ const blooioChannel = {
 
   gateway: {
     startAccount: async (ctx: any) => {
-      // Bloo.io uses external webhooks forwarded by the moltworker,
-      // so there's no long-lived connection to establish here.
-      ctx.log?.info?.('Bloo.io channel account started (webhook-based, no persistent connection)');
+      // Bloo.io is webhook-based (like BlueBubbles) — no long-lived connection.
+      // Inbound messages arrive via webhooks forwarded by the moltworker.
+      ctx.log?.info?.('Bloo.io channel started (webhook-based, no persistent connection)');
       ctx.updateSnapshot?.({ running: true, lastStartAt: new Date().toISOString() });
       return { stop: () => {} };
     },
@@ -326,8 +347,8 @@ const blooioChannel = {
       lastError: null,
     },
     probe: async ({ cfg }: any) => {
-      const account = getAccountConfig(cfg);
-      return { ok: Boolean(account?.apiKey), details: {} };
+      const channelCfg = getChannelConfig(cfg);
+      return { ok: Boolean(channelCfg?.apiKey), details: {} };
     },
     buildChannelSummary: ({ snapshot }: any) => ({
       configured: snapshot?.configured ?? false,
@@ -338,6 +359,10 @@ const blooioChannel = {
     }),
   },
 };
+
+// ---------------------------------------------------------------------------
+// Plugin registration
+// ---------------------------------------------------------------------------
 
 export default function register(api: any) {
   pluginRuntime = api.runtime;
@@ -356,7 +381,6 @@ export default function register(api: any) {
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
         const { external_id, text, message_id, timestamp, is_group, group_id, sender } = body;
 
-        // Validate required fields are strings (not just truthy)
         if (typeof external_id !== 'string' || !external_id) {
           res.status(400).json({ error: 'external_id must be a non-empty string' });
           return;
@@ -381,9 +405,9 @@ export default function register(api: any) {
             : new Date(parsed).toISOString();
         }
 
-        const account = getAccountConfig(cfg, accountId);
-        if (!account) {
-          api.logger.warn('Bloo.io getAccountConfig returned null for account:', accountId);
+        const channelCfg = getChannelConfig(cfg);
+        if (!channelCfg) {
+          api.logger.warn('Bloo.io channel config not found');
           res.status(503).json({ error: 'Bloo.io channel not configured' });
           return;
         }
