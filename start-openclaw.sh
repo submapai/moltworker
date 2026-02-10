@@ -232,11 +232,11 @@ if (fs.existsSync(pluginPath + '/package.json')) {
     // Dedup plugin load paths (stale R2 backups may have duplicates)
     config.plugins.load.paths = [...new Set(config.plugins.load.paths)];
 
-    // Enable plugin entry — key must match package.json name
+    // Enable plugin entry — key must match openclaw.plugin.json id
     config.plugins.entries = config.plugins.entries || {};
     // Clean up stale entry from older config (R2 backup may have wrong key)
-    delete config.plugins.entries['blooio'];
-    config.plugins.entries['openclaw-channel-blooio'] = {
+    delete config.plugins.entries['openclaw-channel-blooio'];
+    config.plugins.entries['blooio'] = {
         enabled: true,
     };
 

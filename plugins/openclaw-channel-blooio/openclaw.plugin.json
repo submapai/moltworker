@@ -3,7 +3,7 @@
   "channels": ["blooio"],
   "configSchema": {
     "type": "object",
-    "additionalProperties": true,
+    "additionalProperties": false,
     "properties": {}
   }
 }

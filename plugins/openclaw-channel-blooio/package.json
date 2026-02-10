@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "openclaw": {
-    "extensions": ["./src/index.ts"],
+    "extensions": ["./index.ts"],
     "channels": ["blooio"],
     "channel": {
       "id": "blooio",
