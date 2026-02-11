@@ -187,21 +187,7 @@ if (process.env.DISCORD_BOT_TOKEN) {
     };
 }
 
-// Slack configuration
-if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
-    config.channels.slack = {
-        botToken: process.env.SLACK_BOT_TOKEN,
-        appToken: process.env.SLACK_APP_TOKEN,
-        enabled: true,
-    };
-} else if (!config.channels.slack) {
-    config.channels.slack = {
-        enabled: false,
-    };
-}
-
-// Bloo.io configuration (iMessage/WhatsApp via Bloo.io)
-// Overwrite entire channel object to drop stale keys from old R2 backups
+// Bloo.io channel configuration
 if (process.env.BLOOIO_API_KEY) {
     config.channels.blooio = {
         apiKey: process.env.BLOOIO_API_KEY,
@@ -218,29 +204,24 @@ if (process.env.BLOOIO_API_KEY) {
     };
 }
 
-// Register Bloo.io channel plugin (copied into image by Dockerfile)
-const pluginPath = '/root/.openclaw/plugins/openclaw-channel-blooio';
-if (fs.existsSync(pluginPath + '/package.json')) {
-    config.plugins = config.plugins || {};
+// Bloo.io channel plugin registration
+config.plugins = config.plugins || [];
+const blooioPlugin = '/root/.openclaw/plugins/openclaw-channel-blooio';
+if (Array.isArray(config.plugins) && !config.plugins.includes(blooioPlugin)) {
+    config.plugins.push(blooioPlugin);
+}
 
-    // Add plugin load path
-    config.plugins.load = config.plugins.load || {};
-    config.plugins.load.paths = config.plugins.load.paths || [];
-    if (!config.plugins.load.paths.includes(pluginPath)) {
-        config.plugins.load.paths.push(pluginPath);
-    }
-    // Dedup plugin load paths (stale R2 backups may have duplicates)
-    config.plugins.load.paths = [...new Set(config.plugins.load.paths)];
-
-    // Enable plugin entry — key must match openclaw.plugin.json id
-    config.plugins.entries = config.plugins.entries || {};
-    // Clean up stale entry from older config (R2 backup may have wrong key)
-    delete config.plugins.entries['openclaw-channel-blooio'];
-    config.plugins.entries['blooio'] = {
+// Slack configuration
+if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
+    config.channels.slack = {
+        botToken: process.env.SLACK_BOT_TOKEN,
+        appToken: process.env.SLACK_APP_TOKEN,
         enabled: true,
     };
-
-    console.log('Registered Bloo.io channel plugin from', pluginPath);
+} else if (!config.channels.slack) {
+    config.channels.slack = {
+        enabled: false,
+    };
 }
 
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));

@@ -151,8 +151,6 @@ app.route('/', publicRoutes);
 // Mount CDP routes (uses shared secret auth via query param, not CF Access)
 app.route('/cdp', cdp);
 
-// /blooio/* routes are handled by the catch-all proxy — OpenClaw handles auth
-
 // =============================================================================
 // PROTECTED ROUTES: Cloudflare Access authentication required
 // =============================================================================
@@ -160,6 +158,11 @@ app.route('/cdp', cdp);
 // Middleware: Validate required environment variables (skip in dev mode and for debug routes)
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
+
+  // Skip validation for /blooio/* webhook paths (OpenClaw handles its own webhook auth)
+  if (url.pathname.startsWith('/blooio')) {
+    return next();
+  }
 
   // Skip validation for debug routes (they have their own enable check)
   if (url.pathname.startsWith('/debug')) {
@@ -201,7 +204,7 @@ app.use('*', async (c, next) => {
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
 
-  // Skip CF Access auth for /blooio/* — OpenClaw handles its own auth
+  // Skip auth for /blooio/* webhook paths (OpenClaw handles its own webhook auth)
   if (url.pathname.startsWith('/blooio')) {
     return next();
   }

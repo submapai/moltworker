@@ -43,13 +43,13 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.TELEGRAM_DM_POLICY) envVars.TELEGRAM_DM_POLICY = env.TELEGRAM_DM_POLICY;
   if (env.DISCORD_BOT_TOKEN) envVars.DISCORD_BOT_TOKEN = env.DISCORD_BOT_TOKEN;
   if (env.DISCORD_DM_POLICY) envVars.DISCORD_DM_POLICY = env.DISCORD_DM_POLICY;
+  if (env.BLOOIO_API_KEY) envVars.BLOOIO_API_KEY = env.BLOOIO_API_KEY;
+  if (env.BLOOIO_WEBHOOK_SECRET) envVars.BLOOIO_WEBHOOK_SECRET = env.BLOOIO_WEBHOOK_SECRET;
   if (env.SLACK_BOT_TOKEN) envVars.SLACK_BOT_TOKEN = env.SLACK_BOT_TOKEN;
   if (env.SLACK_APP_TOKEN) envVars.SLACK_APP_TOKEN = env.SLACK_APP_TOKEN;
   if (env.CF_AI_GATEWAY_MODEL) envVars.CF_AI_GATEWAY_MODEL = env.CF_AI_GATEWAY_MODEL;
   if (env.CF_ACCOUNT_ID) envVars.CF_ACCOUNT_ID = env.CF_ACCOUNT_ID;
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
-  if (env.BLOOIO_API_KEY) envVars.BLOOIO_API_KEY = env.BLOOIO_API_KEY;
-
   return envVars;
 }

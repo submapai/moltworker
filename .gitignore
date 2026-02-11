@@ -37,6 +37,9 @@ Thumbs.db
 # Docker build artifacts
 *.tar
 
+# Copied channel plugins (injected at build time by release script)
+plugins/
+
 # Veta agent memory
 .veta/
 

@@ -101,6 +101,19 @@ describe('buildEnvVars', () => {
     expect(result.OPENCLAW_GATEWAY_TOKEN).toBe('my-token');
   });
 
+  // Bloo.io tokens
+  it('includes BLOOIO_API_KEY when set', () => {
+    const env = createMockEnv({ BLOOIO_API_KEY: 'bloo-key' });
+    const result = buildEnvVars(env);
+    expect(result.BLOOIO_API_KEY).toBe('bloo-key');
+  });
+
+  it('includes BLOOIO_WEBHOOK_SECRET when set', () => {
+    const env = createMockEnv({ BLOOIO_WEBHOOK_SECRET: 'bloo-secret' });
+    const result = buildEnvVars(env);
+    expect(result.BLOOIO_WEBHOOK_SECRET).toBe('bloo-secret');
+  });
+
   // Channel tokens
   it('includes all channel tokens when set', () => {
     const env = createMockEnv({
@@ -142,19 +155,6 @@ describe('buildEnvVars', () => {
     const env = createMockEnv({ CF_ACCOUNT_ID: 'acct-123' });
     const result = buildEnvVars(env);
     expect(result.CF_ACCOUNT_ID).toBe('acct-123');
-  });
-
-  // Bloo.io channel tokens
-  it('includes BLOOIO_API_KEY when set', () => {
-    const env = createMockEnv({ BLOOIO_API_KEY: 'bloo-key-123' });
-    const result = buildEnvVars(env);
-    expect(result.BLOOIO_API_KEY).toBe('bloo-key-123');
-  });
-
-  it('includes BLOOIO_API_KEY alone', () => {
-    const env = createMockEnv({ BLOOIO_API_KEY: 'bloo-key' });
-    const result = buildEnvVars(env);
-    expect(result.BLOOIO_API_KEY).toBe('bloo-key');
   });
 
   it('combines all env vars correctly', () => {

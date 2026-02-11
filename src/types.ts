@@ -28,6 +28,8 @@ export interface MoltbotEnv {
   TELEGRAM_DM_POLICY?: string;
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
+  BLOOIO_API_KEY?: string; // Bloo.io Bearer API key for outbound messages
+  BLOOIO_WEBHOOK_SECRET?: string; // HMAC secret for inbound webhook verification
   SLACK_BOT_TOKEN?: string;
   SLACK_APP_TOKEN?: string;
   // Cloudflare Access configuration for admin routes
@@ -42,8 +44,6 @@ export interface MoltbotEnv {
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
-  // Bloo.io messaging integration
-  BLOOIO_API_KEY?: string; // Bearer token for Bloo.io send API
 }
 
 /**

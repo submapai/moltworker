@@ -36,7 +36,7 @@ COPY plugins/openclaw-channel-blooio/ /root/.openclaw/plugins/openclaw-channel-b
 RUN cd /root/.openclaw/plugins/openclaw-channel-blooio && npm install --omit=dev 2>/dev/null || true
 
 # Copy startup script
-# Build cache bust: 2026-02-10-v32-fix-blooio-plugin-entry-key
+# Build cache bust: 2026-02-10-v34-readd-blooio
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 
