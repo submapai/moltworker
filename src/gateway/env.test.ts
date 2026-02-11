@@ -139,6 +139,14 @@ describe('buildEnvVars', () => {
       TELEGRAM_DM_ALLOW_FROM: '123,456',
       DISCORD_BOT_TOKEN: 'discord-token',
       DISCORD_DM_POLICY: 'open',
+      BLUEBUBBLES_SERVER_URL: 'http://bluebubbles.local:1234',
+      BLUEBUBBLES_PASSWORD: 'blue-secret',
+      BLUEBUBBLES_WEBHOOK_PATH: '/bluebubbles-webhook',
+      BLUEBUBBLES_DM_POLICY: 'allowlist',
+      BLUEBUBBLES_DM_ALLOW_FROM: '+15550001111',
+      BLUEBUBBLES_GROUP_POLICY: 'disabled',
+      BLUEBUBBLES_GROUP_ALLOW_FROM: 'chat123',
+      BLUEBUBBLES_BLOCK_STREAMING: 'true',
       SLACK_BOT_TOKEN: 'slack-bot',
       SLACK_APP_TOKEN: 'slack-app',
     });
@@ -149,6 +157,14 @@ describe('buildEnvVars', () => {
     expect(result.TELEGRAM_DM_ALLOW_FROM).toBe('123,456');
     expect(result.DISCORD_BOT_TOKEN).toBe('discord-token');
     expect(result.DISCORD_DM_POLICY).toBe('open');
+    expect(result.BLUEBUBBLES_SERVER_URL).toBe('http://bluebubbles.local:1234');
+    expect(result.BLUEBUBBLES_PASSWORD).toBe('blue-secret');
+    expect(result.BLUEBUBBLES_WEBHOOK_PATH).toBe('/bluebubbles-webhook');
+    expect(result.BLUEBUBBLES_DM_POLICY).toBe('allowlist');
+    expect(result.BLUEBUBBLES_DM_ALLOW_FROM).toBe('+15550001111');
+    expect(result.BLUEBUBBLES_GROUP_POLICY).toBe('disabled');
+    expect(result.BLUEBUBBLES_GROUP_ALLOW_FROM).toBe('chat123');
+    expect(result.BLUEBUBBLES_BLOCK_STREAMING).toBe('true');
     expect(result.SLACK_BOT_TOKEN).toBe('slack-bot');
     expect(result.SLACK_APP_TOKEN).toBe('slack-app');
   });

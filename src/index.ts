@@ -47,8 +47,22 @@ function transformErrorMessage(message: string, host: string): string {
   return message;
 }
 
-function isBlooioWebhookPath(pathname: string): boolean {
-  return pathname === '/blooio' || pathname.startsWith('/blooio/');
+function normalizeWebhookPath(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return '/';
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+function matchesWebhookPath(pathname: string, webhookPath: string): boolean {
+  return pathname === webhookPath || pathname.startsWith(`${webhookPath}/`);
+}
+
+function isPublicChannelWebhookPath(pathname: string, env: MoltbotEnv): boolean {
+  if (matchesWebhookPath(pathname, '/blooio')) return true;
+  const bluebubblesPath = normalizeWebhookPath(
+    env.BLUEBUBBLES_WEBHOOK_PATH || '/bluebubbles-webhook',
+  );
+  return matchesWebhookPath(pathname, bluebubblesPath);
 }
 
 export { Sandbox };
@@ -164,7 +178,7 @@ app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
 
   // Skip validation for /blooio/* webhook paths (OpenClaw handles its own webhook auth)
-  if (isBlooioWebhookPath(url.pathname)) {
+  if (isPublicChannelWebhookPath(url.pathname, c.env)) {
     return next();
   }
 
@@ -209,7 +223,7 @@ app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
 
   // Skip auth for /blooio/* webhook paths (OpenClaw handles its own webhook auth)
-  if (isBlooioWebhookPath(url.pathname)) {
+  if (isPublicChannelWebhookPath(url.pathname, c.env)) {
     return next();
   }
 

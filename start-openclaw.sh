@@ -61,7 +61,7 @@ fi
 # PATCH CONFIG (channels, gateway auth, trusted proxies)
 # ============================================================
 # openclaw onboard handles provider/model config, but we need to patch in:
-# - Channel config (Telegram, Discord, Bloo.io, Slack)
+# - Channel config (Telegram, Discord, BlueBubbles, Bloo.io, Slack)
 # - Gateway token auth
 # - Trusted proxies for sandbox networking
 # - Provider/base URL overrides
@@ -221,6 +221,48 @@ if (process.env.DISCORD_BOT_TOKEN) {
     };
 }
 
+// BlueBubbles configuration
+if (process.env.BLUEBUBBLES_SERVER_URL && process.env.BLUEBUBBLES_PASSWORD) {
+    const bluebubbles = asObject(config.channels.bluebubbles);
+
+    bluebubbles.serverUrl = process.env.BLUEBUBBLES_SERVER_URL;
+    bluebubbles.password = process.env.BLUEBUBBLES_PASSWORD;
+    bluebubbles.enabled = true;
+
+    if (process.env.BLUEBUBBLES_WEBHOOK_PATH) {
+        const rawPath = process.env.BLUEBUBBLES_WEBHOOK_PATH.trim();
+        if (rawPath.length > 0) {
+            bluebubbles.webhookPath = rawPath.startsWith('/') ? rawPath : '/' + rawPath;
+        }
+    }
+
+    if (process.env.BLUEBUBBLES_DM_POLICY) {
+        bluebubbles.dmPolicy = process.env.BLUEBUBBLES_DM_POLICY;
+    }
+    if (process.env.BLUEBUBBLES_GROUP_POLICY) {
+        bluebubbles.groupPolicy = process.env.BLUEBUBBLES_GROUP_POLICY;
+    }
+
+    const dmAllowFrom = parseCsvList(process.env.BLUEBUBBLES_DM_ALLOW_FROM);
+    const groupAllowFrom = parseCsvList(process.env.BLUEBUBBLES_GROUP_ALLOW_FROM);
+    if (dmAllowFrom.length > 0) {
+        bluebubbles.allowFrom = dmAllowFrom;
+    }
+    if (groupAllowFrom.length > 0) {
+        bluebubbles.groupAllowFrom = groupAllowFrom;
+    }
+
+    if (process.env.BLUEBUBBLES_BLOCK_STREAMING) {
+        bluebubbles.blockStreaming = process.env.BLUEBUBBLES_BLOCK_STREAMING.toLowerCase() === 'true';
+    }
+
+    config.channels.bluebubbles = bluebubbles;
+} else if (!config.channels.bluebubbles) {
+    config.channels.bluebubbles = {
+        enabled: false,
+    };
+}
+
 // Bloo.io channel configuration
 if (process.env.BLOOIO_API_KEY) {
     const blooio = asObject(config.channels.blooio);
@@ -259,7 +301,7 @@ if (process.env.BLOOIO_API_KEY) {
 
 // Bloo.io channel plugin registration
 // load.paths entries are directories OpenClaw scans for plugin subdirectories,
-// so we point to the parent — OpenClaw discovers openclaw-channel-blooio inside it.
+// so we point to the parent — OpenClaw discovers the blooio plugin folder inside it.
 const blooioPluginPath = '/root/.openclaw/plugins';
 // plugins.entries keys are resolved by plugin ID (from openclaw.plugin.json),
 // not npm package name.

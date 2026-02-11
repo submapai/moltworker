@@ -43,7 +43,7 @@ function createExecutionContext(): ExecutionContext {
   } as unknown as ExecutionContext;
 }
 
-describe('worker blooio routing', () => {
+describe('worker channel webhook routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findExistingMoltbotProcess.mockResolvedValue(null);
@@ -104,5 +104,65 @@ describe('worker blooio routing', () => {
     });
     expect(containerFetch).not.toHaveBeenCalled();
     expect(mocks.ensureMoltbotGateway).not.toHaveBeenCalled();
+  });
+
+  it('proxies default BlueBubbles webhook path without applying CF Access middleware', async () => {
+    const containerFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    mocks.getSandbox.mockReturnValue({
+      containerFetch,
+      wsConnect: vi.fn(),
+    });
+
+    const authMiddleware = vi.fn(async (c: any) => c.json({ error: 'Unauthorized' }, 401));
+    mocks.createAccessMiddleware.mockReturnValue(authMiddleware);
+
+    const req = new Request('https://example.com/bluebubbles-webhook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'message' }),
+    });
+    const env = createMockEnv();
+    const res = await worker.fetch(req, env, createExecutionContext());
+
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(mocks.createAccessMiddleware).not.toHaveBeenCalled();
+    expect(authMiddleware).not.toHaveBeenCalled();
+    expect(containerFetch).toHaveBeenCalledWith(req, 18789);
+  });
+
+  it('proxies custom BlueBubbles webhook path from env without applying CF Access middleware', async () => {
+    const containerFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    mocks.getSandbox.mockReturnValue({
+      containerFetch,
+      wsConnect: vi.fn(),
+    });
+
+    const authMiddleware = vi.fn(async (c: any) => c.json({ error: 'Unauthorized' }, 401));
+    mocks.createAccessMiddleware.mockReturnValue(authMiddleware);
+
+    const req = new Request('https://example.com/hooks/bluebubbles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'message' }),
+    });
+    const env = createMockEnv({ BLUEBUBBLES_WEBHOOK_PATH: '/hooks/bluebubbles' });
+    const res = await worker.fetch(req, env, createExecutionContext());
+
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(mocks.createAccessMiddleware).not.toHaveBeenCalled();
+    expect(authMiddleware).not.toHaveBeenCalled();
+    expect(containerFetch).toHaveBeenCalledWith(req, 18789);
   });
 });
