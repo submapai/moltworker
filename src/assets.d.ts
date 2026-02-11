@@ -6,6 +6,11 @@ declare module '*.html' {
   export default content;
 }
 
+declare module '*.html?raw' {
+  const content: string;
+  export default content;
+}
+
 declare module '*.png' {
   // Vite compiles PNG imports to URL paths (strings), not binary data
   const content: string;

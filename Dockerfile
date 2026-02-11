@@ -25,8 +25,7 @@ RUN npm install -g pnpm
 RUN npm install -g openclaw@2026.2.9 \
     && openclaw --version
 
-# Create OpenClaw directories
-# Legacy .clawdbot paths are kept for R2 backup migration
+# Create OpenClaw runtime directories
 RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
@@ -36,7 +35,6 @@ COPY plugins/openclaw-channel-blooio/ /root/.openclaw/plugins/openclaw-channel-b
 RUN cd /root/.openclaw/plugins/openclaw-channel-blooio && npm install --omit=dev 2>/dev/null || true
 
 # Copy startup script
-# Build cache bust: 2026-02-11-v36-fix-blooio-plugin-entry-id
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 

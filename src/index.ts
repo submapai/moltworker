@@ -29,8 +29,8 @@ import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
-import loadingPageHtml from './assets/loading.html';
-import configErrorHtml from './assets/config-error.html';
+import loadingPageHtml from './assets/loading.html?raw';
+import configErrorHtml from './assets/config-error.html?raw';
 
 /**
  * Transform error messages from the gateway to be more user-friendly.
@@ -45,6 +45,10 @@ function transformErrorMessage(message: string, host: string): string {
   }
 
   return message;
+}
+
+function isBlooioWebhookPath(pathname: string): boolean {
+  return pathname === '/blooio' || pathname.startsWith('/blooio/');
 }
 
 export { Sandbox };
@@ -160,7 +164,7 @@ app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
 
   // Skip validation for /blooio/* webhook paths (OpenClaw handles its own webhook auth)
-  if (url.pathname.startsWith('/blooio')) {
+  if (isBlooioWebhookPath(url.pathname)) {
     return next();
   }
 
@@ -205,7 +209,7 @@ app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
 
   // Skip auth for /blooio/* webhook paths (OpenClaw handles its own webhook auth)
-  if (url.pathname.startsWith('/blooio')) {
+  if (isBlooioWebhookPath(url.pathname)) {
     return next();
   }
 

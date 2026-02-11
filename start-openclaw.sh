@@ -61,10 +61,10 @@ fi
 # PATCH CONFIG (channels, gateway auth, trusted proxies)
 # ============================================================
 # openclaw onboard handles provider/model config, but we need to patch in:
-# - Channel config (Telegram, Discord, Slack)
+# - Channel config (Telegram, Discord, Bloo.io, Slack)
 # - Gateway token auth
 # - Trusted proxies for sandbox networking
-# - Base URL override for legacy AI Gateway path
+# - Provider/base URL overrides
 node << 'EOFPATCH'
 const fs = require('fs');
 
@@ -113,7 +113,7 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
     config.gateway.controlUi.allowInsecureAuth = true;
 }
 
-// Legacy AI Gateway base URL override:
+// AI Gateway base URL override:
 // ANTHROPIC_BASE_URL is picked up natively by the Anthropic SDK,
 // so we don't need to patch the provider config. Writing a provider
 // entry without a models array breaks OpenClaw's config validation.
@@ -265,32 +265,19 @@ const blooioPluginPath = '/root/.openclaw/plugins';
 // not npm package name.
 const blooioPluginEntryKey = 'blooio';
 
-if (Array.isArray(config.plugins)) {
-    // Backward compatibility for legacy array-based plugin config.
-    if (!config.plugins.includes(blooioPluginPath)) {
-        config.plugins.push(blooioPluginPath);
-    }
-} else {
-    config.plugins = (config.plugins && typeof config.plugins === 'object') ? config.plugins : {};
-    config.plugins.load = config.plugins.load || {};
-    config.plugins.load.paths = Array.isArray(config.plugins.load.paths) ? config.plugins.load.paths : [];
-    if (!config.plugins.load.paths.includes(blooioPluginPath)) {
-        config.plugins.load.paths.push(blooioPluginPath);
-    }
-
-    config.plugins.entries = config.plugins.entries || {};
-    const existingEntry = config.plugins.entries[blooioPluginEntryKey];
-    const normalizedEntry =
-        existingEntry && typeof existingEntry === 'object' && !Array.isArray(existingEntry)
-            ? existingEntry
-            : {};
-    if (normalizedEntry.enabled === undefined) {
-        normalizedEntry.enabled = true;
-    }
-    config.plugins.entries[blooioPluginEntryKey] = normalizedEntry;
-    // Clean up stale entry written by older startup script versions.
-    delete config.plugins.entries['openclaw-channel-blooio'];
+config.plugins = asObject(config.plugins);
+config.plugins.load = asObject(config.plugins.load);
+config.plugins.load.paths = Array.isArray(config.plugins.load.paths) ? config.plugins.load.paths : [];
+if (!config.plugins.load.paths.includes(blooioPluginPath)) {
+    config.plugins.load.paths.push(blooioPluginPath);
 }
+
+config.plugins.entries = asObject(config.plugins.entries);
+const blooioEntry = asObject(config.plugins.entries[blooioPluginEntryKey]);
+if (blooioEntry.enabled === undefined) {
+    blooioEntry.enabled = true;
+}
+config.plugins.entries[blooioPluginEntryKey] = blooioEntry;
 
 // Slack configuration
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {

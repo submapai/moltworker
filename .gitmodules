@@ -1,0 +1,6 @@
+[submodule "submodules/channels"]
+	path = submodules/channels
+	url = https://github.com/submapai/channels.git
+[submodule "submodules/skills"]
+	path = submodules/skills
+	url = https://github.com/submapai/skills.git
