@@ -66,7 +66,7 @@ async function postInboundWebhook(opts: {
     received_at: 1770836811289,
   };
 
-  const req = new PassThrough() as IncomingMessage;
+  const req = new PassThrough() as unknown as IncomingMessage & PassThrough;
   (req as any).method = 'POST';
   (req as any).url = '/blooio/inbound';
   (req as any).headers = { 'content-type': 'application/json' };
@@ -110,6 +110,16 @@ describe('blooio webhook', () => {
           },
         },
       }),
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.status).toBe(202);
+    expect(result.body).toEqual({ ok: true });
+  });
+
+  it('accepts inbound payloads even when channels.blooio is omitted', async () => {
+    const result = await postInboundWebhook({
+      getConfig: () => ({}),
     });
 
     expect(result.handled).toBe(true);

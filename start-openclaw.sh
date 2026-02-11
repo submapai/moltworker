@@ -264,40 +264,38 @@ if (process.env.BLUEBUBBLES_SERVER_URL && process.env.BLUEBUBBLES_PASSWORD) {
 }
 
 // Bloo.io channel configuration
+const blooio = asObject(config.channels.blooio);
 if (process.env.BLOOIO_API_KEY) {
-    const blooio = asObject(config.channels.blooio);
-
     blooio.apiKey = process.env.BLOOIO_API_KEY;
-    blooio.enabled = true;
-    if (process.env.BLOOIO_OUTBOUND) {
-        const isOutboundEnabled = process.env.BLOOIO_OUTBOUND.toLowerCase() === 'true';
-        blooio.outbound = isOutboundEnabled;
-    } else if (blooio.outbound === undefined) {
-        blooio.outbound = true;
-    }
-
-    if (process.env.BLOOIO_DM_POLICY) {
-        blooio.dmPolicy = process.env.BLOOIO_DM_POLICY;
-    }
-    if (process.env.BLOOIO_GROUP_POLICY) {
-        blooio.groupPolicy = process.env.BLOOIO_GROUP_POLICY;
-    }
-
-    const dmAllowFrom = parseCsvList(process.env.BLOOIO_DM_ALLOW_FROM);
-    const groupAllowFrom = parseCsvList(process.env.BLOOIO_GROUP_ALLOW_FROM);
-    if (dmAllowFrom.length > 0) {
-        blooio.allowFrom = dmAllowFrom;
-    }
-    if (groupAllowFrom.length > 0) {
-        blooio.groupAllowFrom = groupAllowFrom;
-    }
-
-    config.channels.blooio = blooio;
-} else if (!config.channels.blooio) {
-    config.channels.blooio = {
-        enabled: false,
-    };
 }
+if (blooio.enabled === undefined) {
+    // Enabled by default; explicit false remains respected.
+    blooio.enabled = true;
+}
+if (process.env.BLOOIO_OUTBOUND) {
+    const isOutboundEnabled = process.env.BLOOIO_OUTBOUND.toLowerCase() === 'true';
+    blooio.outbound = isOutboundEnabled;
+} else if (blooio.outbound === undefined) {
+    blooio.outbound = true;
+}
+
+if (process.env.BLOOIO_DM_POLICY) {
+    blooio.dmPolicy = process.env.BLOOIO_DM_POLICY;
+}
+if (process.env.BLOOIO_GROUP_POLICY) {
+    blooio.groupPolicy = process.env.BLOOIO_GROUP_POLICY;
+}
+
+const dmAllowFrom = parseCsvList(process.env.BLOOIO_DM_ALLOW_FROM);
+const groupAllowFrom = parseCsvList(process.env.BLOOIO_GROUP_ALLOW_FROM);
+if (dmAllowFrom.length > 0) {
+    blooio.allowFrom = dmAllowFrom;
+}
+if (groupAllowFrom.length > 0) {
+    blooio.groupAllowFrom = groupAllowFrom;
+}
+
+config.channels.blooio = blooio;
 
 // Bloo.io channel plugin registration
 // load.paths entries are directories OpenClaw scans for plugin subdirectories,
