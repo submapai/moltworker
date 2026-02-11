@@ -261,7 +261,9 @@ if (process.env.BLOOIO_API_KEY) {
 // load.paths entries are directories OpenClaw scans for plugin subdirectories,
 // so we point to the parent — OpenClaw discovers openclaw-channel-blooio inside it.
 const blooioPluginPath = '/root/.openclaw/plugins';
-const blooioPluginEntryKey = 'openclaw-channel-blooio';
+// plugins.entries keys are resolved by plugin ID (from openclaw.plugin.json),
+// not npm package name.
+const blooioPluginEntryKey = 'blooio';
 
 if (Array.isArray(config.plugins)) {
     // Backward compatibility for legacy array-based plugin config.
@@ -286,7 +288,8 @@ if (Array.isArray(config.plugins)) {
         normalizedEntry.enabled = true;
     }
     config.plugins.entries[blooioPluginEntryKey] = normalizedEntry;
-    delete config.plugins.entries.blooio;
+    // Clean up stale entry written by older startup script versions.
+    delete config.plugins.entries['openclaw-channel-blooio'];
 }
 
 // Slack configuration
