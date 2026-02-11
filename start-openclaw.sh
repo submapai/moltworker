@@ -264,6 +264,7 @@ const blooioPluginPath = '/root/.openclaw/plugins';
 // plugins.entries keys are resolved by plugin ID (from openclaw.plugin.json),
 // not npm package name.
 const blooioPluginEntryKey = 'blooio';
+const blooioLegacyEntryKey = 'openclaw-channel-blooio';
 
 config.plugins = asObject(config.plugins);
 config.plugins.load = asObject(config.plugins.load);
@@ -274,10 +275,15 @@ if (!config.plugins.load.paths.includes(blooioPluginPath)) {
 
 config.plugins.entries = asObject(config.plugins.entries);
 const blooioEntry = asObject(config.plugins.entries[blooioPluginEntryKey]);
-if (blooioEntry.enabled === undefined) {
-    blooioEntry.enabled = true;
+const blooioLegacyEntry = asObject(config.plugins.entries[blooioLegacyEntryKey]);
+
+// Migrate stale key if config was previously written with package/folder name.
+const mergedBlooioEntry = { ...blooioLegacyEntry, ...blooioEntry };
+if (mergedBlooioEntry.enabled === undefined) {
+    mergedBlooioEntry.enabled = true;
 }
-config.plugins.entries[blooioPluginEntryKey] = blooioEntry;
+config.plugins.entries[blooioPluginEntryKey] = mergedBlooioEntry;
+delete config.plugins.entries[blooioLegacyEntryKey];
 
 // Slack configuration
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
