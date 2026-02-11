@@ -258,7 +258,9 @@ if (process.env.BLOOIO_API_KEY) {
 }
 
 // Bloo.io channel plugin registration
-const blooioPluginPath = '/root/.openclaw/plugins/openclaw-channel-blooio';
+// load.paths entries are directories OpenClaw scans for plugin subdirectories,
+// so we point to the parent — OpenClaw discovers openclaw-channel-blooio inside it.
+const blooioPluginPath = '/root/.openclaw/plugins';
 const blooioPluginEntryKey = 'openclaw-channel-blooio';
 
 if (Array.isArray(config.plugins)) {
