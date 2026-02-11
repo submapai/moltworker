@@ -353,6 +353,7 @@ echo "Gateway will be available on port 18789"
 rm -f /tmp/openclaw-gateway.lock 2>/dev/null || true
 rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
 
+export OPENCLAW_EAGER_CHANNEL_OPTIONS=true
 echo "Dev mode: ${OPENCLAW_DEV_MODE:-false}"
 
 if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then

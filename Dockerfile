@@ -20,9 +20,10 @@ RUN ARCH="$(dpkg --print-architecture)" \
 # Install pnpm globally
 RUN npm install -g pnpm
 
-# Install OpenClaw (formerly clawdbot/moltbot)
-# Pin to specific version for reproducible builds
-RUN npm install -g openclaw@2026.2.9 \
+# Install OpenClaw from submapai/openclaw
+# OPENCLAW_GIT_REF can be a branch, tag, or commit SHA.
+ARG OPENCLAW_GIT_REF=main
+RUN npm install -g "https://codeload.github.com/submapai/openclaw/tar.gz/${OPENCLAW_GIT_REF}" \
     && openclaw --version
 
 # Create OpenClaw runtime directories
