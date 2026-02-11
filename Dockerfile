@@ -31,7 +31,8 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy Bloo.io channel plugin (registered at runtime via start-openclaw.sh config patch)
-COPY plugins/blooio/ /root/.openclaw/plugins/blooio/
+# Source of truth now lives under the nested channels submodule.
+COPY submodules/channels/blooio/ /root/.openclaw/plugins/blooio/
 RUN cd /root/.openclaw/plugins/blooio && npm install --omit=dev 2>/dev/null || true
 
 # Copy startup script
