@@ -78,13 +78,30 @@ try {
     console.log('Starting with empty config');
 }
 
+function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function asObject(value) {
+    return isPlainObject(value) ? value : {};
+}
+
+function parseCsvList(raw) {
+    if (!raw) return [];
+    return raw
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
 config.gateway = config.gateway || {};
 config.channels = config.channels || {};
 
 // Gateway configuration
 config.gateway.port = 18789;
 config.gateway.mode = 'local';
-config.gateway.trustedProxies = ['10.1.0.0'];
+const trustedProxies = parseCsvList(process.env.OPENCLAW_TRUSTED_PROXIES);
+config.gateway.trustedProxies = trustedProxies.length > 0 ? trustedProxies : ['10.1.0.0'];
 
 if (process.env.OPENCLAW_GATEWAY_TOKEN) {
     config.gateway.auth = config.gateway.auth || {};
@@ -108,60 +125,75 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
 //   openai/gpt-4o
 //   anthropic/claude-sonnet-4-5
 if (process.env.CF_AI_GATEWAY_MODEL) {
-    const raw = process.env.CF_AI_GATEWAY_MODEL;
+    const raw = process.env.CF_AI_GATEWAY_MODEL.trim();
     const slashIdx = raw.indexOf('/');
-    const gwProvider = raw.substring(0, slashIdx);
-    const modelId = raw.substring(slashIdx + 1);
+    const hasValidSeparator = slashIdx > 0 && slashIdx < raw.length - 1;
 
-    const accountId = process.env.CF_AI_GATEWAY_ACCOUNT_ID;
-    const gatewayId = process.env.CF_AI_GATEWAY_GATEWAY_ID;
-    const apiKey = process.env.CLOUDFLARE_AI_GATEWAY_API_KEY;
-
-    let baseUrl;
-    if (accountId && gatewayId) {
-        baseUrl = 'https://gateway.ai.cloudflare.com/v1/' + accountId + '/' + gatewayId + '/' + gwProvider;
-        if (gwProvider === 'workers-ai') baseUrl += '/v1';
-    } else if (gwProvider === 'workers-ai' && process.env.CF_ACCOUNT_ID) {
-        baseUrl = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CF_ACCOUNT_ID + '/ai/v1';
-    }
-
-    if (baseUrl && apiKey) {
-        const api = gwProvider === 'anthropic' ? 'anthropic-messages' : 'openai-completions';
-        const providerName = 'cf-ai-gw-' + gwProvider;
-
-        config.models = config.models || {};
-        config.models.providers = config.models.providers || {};
-        config.models.providers[providerName] = {
-            baseUrl: baseUrl,
-            apiKey: apiKey,
-            api: api,
-            models: [{ id: modelId, name: modelId, contextWindow: 131072, maxTokens: 8192 }],
-        };
-        config.agents = config.agents || {};
-        config.agents.defaults = config.agents.defaults || {};
-        config.agents.defaults.model = { primary: providerName + '/' + modelId };
-        console.log('AI Gateway model override: provider=' + providerName + ' model=' + modelId + ' via ' + baseUrl);
+    if (!hasValidSeparator) {
+        console.warn(
+            'CF_AI_GATEWAY_MODEL must be in provider/model-id format. Example: workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+        );
     } else {
-        console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
+        const gwProvider = raw.substring(0, slashIdx).trim();
+        const modelId = raw.substring(slashIdx + 1).trim();
+        const providerPattern = /^[a-z0-9][a-z0-9-]*$/i;
+
+        if (!providerPattern.test(gwProvider) || modelId.length === 0) {
+            console.warn(
+                `CF_AI_GATEWAY_MODEL contains an invalid provider or model id: "${raw}". Expected provider/model-id.`,
+            );
+        } else {
+            const accountId = process.env.CF_AI_GATEWAY_ACCOUNT_ID;
+            const gatewayId = process.env.CF_AI_GATEWAY_GATEWAY_ID;
+            const apiKey = process.env.CLOUDFLARE_AI_GATEWAY_API_KEY;
+
+            let baseUrl;
+            if (accountId && gatewayId) {
+                baseUrl = 'https://gateway.ai.cloudflare.com/v1/' + accountId + '/' + gatewayId + '/' + gwProvider;
+                if (gwProvider === 'workers-ai') baseUrl += '/v1';
+            } else if (gwProvider === 'workers-ai' && process.env.CF_ACCOUNT_ID) {
+                baseUrl = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CF_ACCOUNT_ID + '/ai/v1';
+            }
+
+            if (baseUrl && apiKey) {
+                const api = gwProvider === 'anthropic' ? 'anthropic-messages' : 'openai-completions';
+                const providerName = 'cf-ai-gw-' + gwProvider;
+
+                config.models = config.models || {};
+                config.models.providers = config.models.providers || {};
+                config.models.providers[providerName] = {
+                    baseUrl: baseUrl,
+                    apiKey: apiKey,
+                    api: api,
+                    models: [{ id: modelId, name: modelId, contextWindow: 131072, maxTokens: 8192 }],
+                };
+                config.agents = config.agents || {};
+                config.agents.defaults = config.agents.defaults || {};
+                config.agents.defaults.model = { primary: providerName + '/' + modelId };
+                console.log('AI Gateway model override: provider=' + providerName + ' model=' + modelId + ' via ' + baseUrl);
+            } else {
+                console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
+            }
+        }
     }
 }
 
 // Telegram configuration
-// Overwrite entire channel object to drop stale keys from old R2 backups
-// that would fail OpenClaw's strict config validation (see #47)
-// Always include a default section so the control UI exposes the config form
 if (process.env.TELEGRAM_BOT_TOKEN) {
-    const dmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
-    config.channels.telegram = {
-        botToken: process.env.TELEGRAM_BOT_TOKEN,
-        enabled: true,
-        dmPolicy: dmPolicy,
-    };
-    if (process.env.TELEGRAM_DM_ALLOW_FROM) {
-        config.channels.telegram.allowFrom = process.env.TELEGRAM_DM_ALLOW_FROM.split(',');
-    } else if (dmPolicy === 'open') {
-        config.channels.telegram.allowFrom = ['*'];
+    const telegram = asObject(config.channels.telegram);
+    const dmPolicy = process.env.TELEGRAM_DM_POLICY || telegram.dmPolicy || 'pairing';
+
+    telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
+    telegram.enabled = true;
+    telegram.dmPolicy = dmPolicy;
+
+    const allowFrom = parseCsvList(process.env.TELEGRAM_DM_ALLOW_FROM);
+    if (allowFrom.length > 0) {
+        telegram.allowFrom = allowFrom;
+    } else if (dmPolicy === 'open' && !Array.isArray(telegram.allowFrom)) {
+        telegram.allowFrom = ['*'];
     }
+    config.channels.telegram = telegram;
 } else if (!config.channels.telegram) {
     config.channels.telegram = {
         enabled: false,
@@ -171,16 +203,18 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
 // Discord configuration
 // Discord uses a nested dm object: dm.policy, dm.allowFrom (per DiscordDmConfig)
 if (process.env.DISCORD_BOT_TOKEN) {
-    const dmPolicy = process.env.DISCORD_DM_POLICY || 'pairing';
-    const dm = { policy: dmPolicy };
-    if (dmPolicy === 'open') {
+    const discord = asObject(config.channels.discord);
+    const dm = asObject(discord.dm);
+    const dmPolicy = process.env.DISCORD_DM_POLICY || dm.policy || 'pairing';
+
+    discord.token = process.env.DISCORD_BOT_TOKEN;
+    discord.enabled = true;
+    dm.policy = dmPolicy;
+    if (dmPolicy === 'open' && !Array.isArray(dm.allowFrom)) {
         dm.allowFrom = ['*'];
     }
-    config.channels.discord = {
-        token: process.env.DISCORD_BOT_TOKEN,
-        enabled: true,
-        dm: dm,
-    };
+    discord.dm = dm;
+    config.channels.discord = discord;
 } else if (!config.channels.discord) {
     config.channels.discord = {
         enabled: false,
@@ -189,15 +223,34 @@ if (process.env.DISCORD_BOT_TOKEN) {
 
 // Bloo.io channel configuration
 if (process.env.BLOOIO_API_KEY) {
-    config.channels.blooio = {
-        apiKey: process.env.BLOOIO_API_KEY,
-        enabled: true,
-        outbound: true,
-        dmPolicy: 'open',
-        groupPolicy: 'open',
-        allowFrom: ['*'],
-        groupAllowFrom: ['*'],
-    };
+    const blooio = asObject(config.channels.blooio);
+
+    blooio.apiKey = process.env.BLOOIO_API_KEY;
+    blooio.enabled = true;
+    if (process.env.BLOOIO_OUTBOUND) {
+        const isOutboundEnabled = process.env.BLOOIO_OUTBOUND.toLowerCase() === 'true';
+        blooio.outbound = isOutboundEnabled;
+    } else if (blooio.outbound === undefined) {
+        blooio.outbound = true;
+    }
+
+    if (process.env.BLOOIO_DM_POLICY) {
+        blooio.dmPolicy = process.env.BLOOIO_DM_POLICY;
+    }
+    if (process.env.BLOOIO_GROUP_POLICY) {
+        blooio.groupPolicy = process.env.BLOOIO_GROUP_POLICY;
+    }
+
+    const dmAllowFrom = parseCsvList(process.env.BLOOIO_DM_ALLOW_FROM);
+    const groupAllowFrom = parseCsvList(process.env.BLOOIO_GROUP_ALLOW_FROM);
+    if (dmAllowFrom.length > 0) {
+        blooio.allowFrom = dmAllowFrom;
+    }
+    if (groupAllowFrom.length > 0) {
+        blooio.groupAllowFrom = groupAllowFrom;
+    }
+
+    config.channels.blooio = blooio;
 } else if (!config.channels.blooio) {
     config.channels.blooio = {
         enabled: false,
@@ -205,19 +258,42 @@ if (process.env.BLOOIO_API_KEY) {
 }
 
 // Bloo.io channel plugin registration
-config.plugins = config.plugins || [];
-const blooioPlugin = '/root/.openclaw/plugins/openclaw-channel-blooio';
-if (Array.isArray(config.plugins) && !config.plugins.includes(blooioPlugin)) {
-    config.plugins.push(blooioPlugin);
+const blooioPluginPath = '/root/.openclaw/plugins/openclaw-channel-blooio';
+const blooioPluginEntryKey = 'openclaw-channel-blooio';
+
+if (Array.isArray(config.plugins)) {
+    // Backward compatibility for legacy array-based plugin config.
+    if (!config.plugins.includes(blooioPluginPath)) {
+        config.plugins.push(blooioPluginPath);
+    }
+} else {
+    config.plugins = (config.plugins && typeof config.plugins === 'object') ? config.plugins : {};
+    config.plugins.load = config.plugins.load || {};
+    config.plugins.load.paths = Array.isArray(config.plugins.load.paths) ? config.plugins.load.paths : [];
+    if (!config.plugins.load.paths.includes(blooioPluginPath)) {
+        config.plugins.load.paths.push(blooioPluginPath);
+    }
+
+    config.plugins.entries = config.plugins.entries || {};
+    const existingEntry = config.plugins.entries[blooioPluginEntryKey];
+    const normalizedEntry =
+        existingEntry && typeof existingEntry === 'object' && !Array.isArray(existingEntry)
+            ? existingEntry
+            : {};
+    if (normalizedEntry.enabled === undefined) {
+        normalizedEntry.enabled = true;
+    }
+    config.plugins.entries[blooioPluginEntryKey] = normalizedEntry;
+    delete config.plugins.entries.blooio;
 }
 
 // Slack configuration
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
-    config.channels.slack = {
-        botToken: process.env.SLACK_BOT_TOKEN,
-        appToken: process.env.SLACK_APP_TOKEN,
-        enabled: true,
-    };
+    const slack = asObject(config.channels.slack);
+    slack.botToken = process.env.SLACK_BOT_TOKEN;
+    slack.appToken = process.env.SLACK_APP_TOKEN;
+    slack.enabled = true;
+    config.channels.slack = slack;
 } else if (!config.channels.slack) {
     config.channels.slack = {
         enabled: false,

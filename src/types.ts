@@ -26,12 +26,19 @@ export interface MoltbotEnv {
   SANDBOX_SLEEP_AFTER?: string; // How long before sandbox sleeps: 'never' (default), or duration like '10m', '1h'
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_DM_POLICY?: string;
+  TELEGRAM_DM_ALLOW_FROM?: string; // Comma-separated Telegram DM allowlist
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
   BLOOIO_API_KEY?: string; // Bloo.io Bearer API key for outbound messages
   BLOOIO_WEBHOOK_SECRET?: string; // HMAC secret for inbound webhook verification
+  BLOOIO_OUTBOUND?: string; // Set to 'true' or 'false' to enable/disable outbound sending
+  BLOOIO_DM_POLICY?: string; // open | pairing | allowlist | disabled
+  BLOOIO_GROUP_POLICY?: string; // open | allowlist | disabled
+  BLOOIO_DM_ALLOW_FROM?: string; // Comma-separated Bloo.io DM allowlist
+  BLOOIO_GROUP_ALLOW_FROM?: string; // Comma-separated Bloo.io group allowlist
   SLACK_BOT_TOKEN?: string;
   SLACK_APP_TOKEN?: string;
+  OPENCLAW_TRUSTED_PROXIES?: string; // Comma-separated trusted proxy CIDRs/IPs
   // Cloudflare Access configuration for admin routes
   CF_ACCESS_TEAM_DOMAIN?: string; // e.g., 'myteam.cloudflareaccess.com'
   CF_ACCESS_AUD?: string; // Application Audience (AUD) tag

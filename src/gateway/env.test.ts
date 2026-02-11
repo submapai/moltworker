@@ -114,11 +114,29 @@ describe('buildEnvVars', () => {
     expect(result.BLOOIO_WEBHOOK_SECRET).toBe('bloo-secret');
   });
 
+  it('includes Bloo.io policy env vars when set', () => {
+    const env = createMockEnv({
+      BLOOIO_OUTBOUND: 'false',
+      BLOOIO_DM_POLICY: 'allowlist',
+      BLOOIO_GROUP_POLICY: 'disabled',
+      BLOOIO_DM_ALLOW_FROM: '+15550001111,+15550002222',
+      BLOOIO_GROUP_ALLOW_FROM: '+15550003333',
+    });
+    const result = buildEnvVars(env);
+
+    expect(result.BLOOIO_OUTBOUND).toBe('false');
+    expect(result.BLOOIO_DM_POLICY).toBe('allowlist');
+    expect(result.BLOOIO_GROUP_POLICY).toBe('disabled');
+    expect(result.BLOOIO_DM_ALLOW_FROM).toBe('+15550001111,+15550002222');
+    expect(result.BLOOIO_GROUP_ALLOW_FROM).toBe('+15550003333');
+  });
+
   // Channel tokens
   it('includes all channel tokens when set', () => {
     const env = createMockEnv({
       TELEGRAM_BOT_TOKEN: 'tg-token',
       TELEGRAM_DM_POLICY: 'pairing',
+      TELEGRAM_DM_ALLOW_FROM: '123,456',
       DISCORD_BOT_TOKEN: 'discord-token',
       DISCORD_DM_POLICY: 'open',
       SLACK_BOT_TOKEN: 'slack-bot',
@@ -128,6 +146,7 @@ describe('buildEnvVars', () => {
 
     expect(result.TELEGRAM_BOT_TOKEN).toBe('tg-token');
     expect(result.TELEGRAM_DM_POLICY).toBe('pairing');
+    expect(result.TELEGRAM_DM_ALLOW_FROM).toBe('123,456');
     expect(result.DISCORD_BOT_TOKEN).toBe('discord-token');
     expect(result.DISCORD_DM_POLICY).toBe('open');
     expect(result.SLACK_BOT_TOKEN).toBe('slack-bot');
@@ -155,6 +174,12 @@ describe('buildEnvVars', () => {
     const env = createMockEnv({ CF_ACCOUNT_ID: 'acct-123' });
     const result = buildEnvVars(env);
     expect(result.CF_ACCOUNT_ID).toBe('acct-123');
+  });
+
+  it('passes OPENCLAW_TRUSTED_PROXIES to container', () => {
+    const env = createMockEnv({ OPENCLAW_TRUSTED_PROXIES: '10.1.0.0,10.2.0.0/16' });
+    const result = buildEnvVars(env);
+    expect(result.OPENCLAW_TRUSTED_PROXIES).toBe('10.1.0.0,10.2.0.0/16');
   });
 
   it('combines all env vars correctly', () => {
