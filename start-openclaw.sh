@@ -312,6 +312,16 @@ if (blooioEntry.enabled === undefined) {
 }
 config.plugins.entries[blooioPluginEntryKey] = blooioEntry;
 
+// Skills configuration – register /root/clawd/skills as an extra discovery dir
+// so the cloudflare-browser skill (and any future skills/) is available by default.
+config.skills = asObject(config.skills);
+config.skills.load = asObject(config.skills.load);
+config.skills.load.extraDirs = Array.isArray(config.skills.load.extraDirs) ? config.skills.load.extraDirs : [];
+const skillsDir = '/root/clawd/skills';
+if (!config.skills.load.extraDirs.includes(skillsDir)) {
+    config.skills.load.extraDirs.push(skillsDir);
+}
+
 // Slack configuration
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     const slack = asObject(config.channels.slack);
