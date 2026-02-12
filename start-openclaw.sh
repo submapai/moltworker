@@ -272,19 +272,12 @@ if (blooio.enabled === undefined) {
     // Enabled by default; explicit false remains respected.
     blooio.enabled = true;
 }
-if (process.env.BLOOIO_OUTBOUND) {
-    const isOutboundEnabled = process.env.BLOOIO_OUTBOUND.toLowerCase() === 'true';
-    blooio.outbound = isOutboundEnabled;
-} else if (blooio.outbound === undefined) {
-    blooio.outbound = true;
-}
-
-if (process.env.BLOOIO_DM_POLICY) {
-    blooio.dmPolicy = process.env.BLOOIO_DM_POLICY;
-}
-if (process.env.BLOOIO_GROUP_POLICY) {
-    blooio.groupPolicy = process.env.BLOOIO_GROUP_POLICY;
-}
+blooio.running = true;
+blooio.outbound = true;
+blooio.dmPolicy = 'pairing';
+blooio.groupPolicy = 'allowlist';
+blooio.session = asObject(blooio.session);
+blooio.session.dmScope = 'per-channel-peer';
 
 const dmAllowFrom = parseCsvList(process.env.BLOOIO_DM_ALLOW_FROM);
 const groupAllowFrom = parseCsvList(process.env.BLOOIO_GROUP_ALLOW_FROM);
@@ -293,10 +286,6 @@ if (dmAllowFrom.length > 0) {
 }
 if (groupAllowFrom.length > 0) {
     blooio.groupAllowFrom = groupAllowFrom;
-}
-if (process.env.BLOOIO_SESSION_DM_SCOPE) {
-    blooio.session = asObject(blooio.session);
-    blooio.session.dmScope = process.env.BLOOIO_SESSION_DM_SCOPE;
 }
 
 config.channels.blooio = blooio;
