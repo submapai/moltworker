@@ -1,7 +1,11 @@
-import { describe, it, expect, vi } from 'vitest';
-import { findExistingMoltbotProcess } from './process';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { findExistingMoltbotProcess, resetProcessCache } from './process';
 import type { Sandbox, Process } from '@cloudflare/sandbox';
 import { createMockSandbox } from '../test-utils';
+
+afterEach(() => {
+  resetProcessCache();
+});
 
 function createFullMockProcess(overrides: Partial<Process> = {}): Process {
   return {

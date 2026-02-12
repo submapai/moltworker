@@ -55,6 +55,13 @@ export function getProcessListHealth(): { lastError: string | null; lastErrorAt:
   return { lastError: lastListError, lastErrorAt: lastListErrorAt };
 }
 
+/** Reset cached process list (for tests) */
+export function resetProcessCache(): void {
+  cachedProcesses = null;
+  cachedAt = 0;
+  listInFlight = null;
+}
+
 /**
  * Find an existing OpenClaw gateway process.
  *
