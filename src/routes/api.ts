@@ -13,7 +13,10 @@ import type { Process } from '@cloudflare/sandbox';
 const CLI_TIMEOUT_MS = 20000;
 
 /** Run a CLI process, wait for it, get logs, then kill it to prevent zombies */
-async function runCliProcess(proc: Process, timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
+async function runCliProcess(
+  proc: Process,
+  timeoutMs: number,
+): Promise<{ stdout: string; stderr: string }> {
   try {
     await waitForProcess(proc, timeoutMs);
     const logs = await proc.getLogs();

@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mountR2Storage } from './r2';
-import {
-  createMockEnv,
-  createMockSandbox,
-  suppressConsole,
-} from '../test-utils';
+import { createMockEnv, createMockSandbox, suppressConsole } from '../test-utils';
 
 describe('mountR2Storage (deprecated no-op)', () => {
   beforeEach(() => {
@@ -26,8 +22,6 @@ describe('mountR2Storage (deprecated no-op)', () => {
 
     await mountR2Storage(sandbox, env);
 
-    expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('deprecated'),
-    );
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('deprecated'));
   });
 });

@@ -28,8 +28,18 @@ describe('syncToR2', () => {
     it('returns error when source has no config file', async () => {
       const { sandbox, existsMock } = createMockSandbox();
       existsMock
-        .mockResolvedValueOnce({ success: true, exists: false, path: '/root/.openclaw/openclaw.json', timestamp: '' })
-        .mockResolvedValueOnce({ success: true, exists: false, path: '/root/.clawdbot/clawdbot.json', timestamp: '' });
+        .mockResolvedValueOnce({
+          success: true,
+          exists: false,
+          path: '/root/.openclaw/openclaw.json',
+          timestamp: '',
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          exists: false,
+          path: '/root/.clawdbot/clawdbot.json',
+          timestamp: '',
+        });
 
       const env = createMockEnv();
 
@@ -45,14 +55,28 @@ describe('syncToR2', () => {
       const bucket = createMockR2Bucket();
       const { sandbox, existsMock, listFilesMock, readFileMock } = createMockSandbox();
 
-      existsMock.mockResolvedValueOnce({ success: true, exists: true, path: '/root/.openclaw/openclaw.json', timestamp: '' });
+      existsMock.mockResolvedValueOnce({
+        success: true,
+        exists: true,
+        path: '/root/.openclaw/openclaw.json',
+        timestamp: '',
+      });
 
       listFilesMock
         // config dir
         .mockResolvedValueOnce({
           success: true,
           files: [
-            { name: 'openclaw.json', absolutePath: '/root/.openclaw/openclaw.json', type: 'file', size: 100, relativePath: 'openclaw.json', modifiedAt: '', mode: '', permissions: {} },
+            {
+              name: 'openclaw.json',
+              absolutePath: '/root/.openclaw/openclaw.json',
+              type: 'file',
+              size: 100,
+              relativePath: 'openclaw.json',
+              modifiedAt: '',
+              mode: '',
+              permissions: {},
+            },
           ],
           count: 1,
           path: '/root/.openclaw',
@@ -62,7 +86,16 @@ describe('syncToR2', () => {
         .mockResolvedValueOnce({
           success: true,
           files: [
-            { name: 'IDENTITY.md', absolutePath: '/root/clawd/IDENTITY.md', type: 'file', size: 50, relativePath: 'IDENTITY.md', modifiedAt: '', mode: '', permissions: {} },
+            {
+              name: 'IDENTITY.md',
+              absolutePath: '/root/clawd/IDENTITY.md',
+              type: 'file',
+              size: 50,
+              relativePath: 'IDENTITY.md',
+              modifiedAt: '',
+              mode: '',
+              permissions: {},
+            },
           ],
           count: 1,
           path: '/root/clawd',
@@ -78,8 +111,18 @@ describe('syncToR2', () => {
         });
 
       readFileMock
-        .mockResolvedValueOnce({ success: true, content: '{"key":"value"}', path: '/root/.openclaw/openclaw.json', timestamp: '' })
-        .mockResolvedValueOnce({ success: true, content: '# Identity', path: '/root/clawd/IDENTITY.md', timestamp: '' });
+        .mockResolvedValueOnce({
+          success: true,
+          content: '{"key":"value"}',
+          path: '/root/.openclaw/openclaw.json',
+          timestamp: '',
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          content: '# Identity',
+          path: '/root/clawd/IDENTITY.md',
+          timestamp: '',
+        });
 
       const env = createMockEnv({ MOLTBOT_BUCKET: bucket as unknown as R2Bucket });
 
@@ -96,22 +139,66 @@ describe('syncToR2', () => {
       const bucket = createMockR2Bucket();
       const { sandbox, existsMock, listFilesMock, readFileMock } = createMockSandbox();
 
-      existsMock.mockResolvedValueOnce({ success: true, exists: true, path: '/root/.openclaw/openclaw.json', timestamp: '' });
+      existsMock.mockResolvedValueOnce({
+        success: true,
+        exists: true,
+        path: '/root/.openclaw/openclaw.json',
+        timestamp: '',
+      });
 
       listFilesMock
         .mockResolvedValueOnce({
           success: true,
           files: [
-            { name: 'openclaw.json', absolutePath: '/root/.openclaw/openclaw.json', type: 'file', size: 100, relativePath: 'openclaw.json', modifiedAt: '', mode: '', permissions: {} },
-            { name: 'gateway.lock', absolutePath: '/root/.openclaw/gateway.lock', type: 'file', size: 10, relativePath: 'gateway.lock', modifiedAt: '', mode: '', permissions: {} },
-            { name: 'debug.log', absolutePath: '/root/.openclaw/debug.log', type: 'file', size: 500, relativePath: 'debug.log', modifiedAt: '', mode: '', permissions: {} },
+            {
+              name: 'openclaw.json',
+              absolutePath: '/root/.openclaw/openclaw.json',
+              type: 'file',
+              size: 100,
+              relativePath: 'openclaw.json',
+              modifiedAt: '',
+              mode: '',
+              permissions: {},
+            },
+            {
+              name: 'gateway.lock',
+              absolutePath: '/root/.openclaw/gateway.lock',
+              type: 'file',
+              size: 10,
+              relativePath: 'gateway.lock',
+              modifiedAt: '',
+              mode: '',
+              permissions: {},
+            },
+            {
+              name: 'debug.log',
+              absolutePath: '/root/.openclaw/debug.log',
+              type: 'file',
+              size: 500,
+              relativePath: 'debug.log',
+              modifiedAt: '',
+              mode: '',
+              permissions: {},
+            },
           ],
           count: 3,
           path: '/root/.openclaw',
           timestamp: '',
         })
-        .mockResolvedValueOnce({ success: true, files: [], count: 0, path: '/root/clawd', timestamp: '' })
-        .mockResolvedValueOnce({ success: true, files: [], count: 0, path: '/root/clawd/skills', timestamp: '' });
+        .mockResolvedValueOnce({
+          success: true,
+          files: [],
+          count: 0,
+          path: '/root/clawd',
+          timestamp: '',
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          files: [],
+          count: 0,
+          path: '/root/clawd/skills',
+          timestamp: '',
+        });
 
       readFileMock.mockResolvedValue({ success: true, content: '{}', path: '', timestamp: '' });
 
@@ -129,30 +216,73 @@ describe('syncToR2', () => {
       const bucket = createMockR2Bucket();
       const { sandbox, existsMock, listFilesMock, readFileMock } = createMockSandbox();
 
-      existsMock.mockResolvedValueOnce({ success: true, exists: true, path: '/root/.openclaw/openclaw.json', timestamp: '' });
+      existsMock.mockResolvedValueOnce({
+        success: true,
+        exists: true,
+        path: '/root/.openclaw/openclaw.json',
+        timestamp: '',
+      });
 
       listFilesMock
-        .mockResolvedValueOnce({ success: true, files: [], count: 0, path: '/root/.openclaw', timestamp: '' })
+        .mockResolvedValueOnce({
+          success: true,
+          files: [],
+          count: 0,
+          path: '/root/.openclaw',
+          timestamp: '',
+        })
         .mockResolvedValueOnce({
           success: true,
           files: [
-            { name: 'IDENTITY.md', absolutePath: '/root/clawd/IDENTITY.md', type: 'file', size: 50, relativePath: 'IDENTITY.md', modifiedAt: '', mode: '', permissions: {} },
-            { name: 'skill.json', absolutePath: '/root/clawd/skills/test/skill.json', type: 'file', size: 30, relativePath: 'skills/test/skill.json', modifiedAt: '', mode: '', permissions: {} },
+            {
+              name: 'IDENTITY.md',
+              absolutePath: '/root/clawd/IDENTITY.md',
+              type: 'file',
+              size: 50,
+              relativePath: 'IDENTITY.md',
+              modifiedAt: '',
+              mode: '',
+              permissions: {},
+            },
+            {
+              name: 'skill.json',
+              absolutePath: '/root/clawd/skills/test/skill.json',
+              type: 'file',
+              size: 30,
+              relativePath: 'skills/test/skill.json',
+              modifiedAt: '',
+              mode: '',
+              permissions: {},
+            },
           ],
           count: 2,
           path: '/root/clawd',
           timestamp: '',
         })
-        .mockResolvedValueOnce({ success: true, files: [], count: 0, path: '/root/clawd/skills', timestamp: '' });
+        .mockResolvedValueOnce({
+          success: true,
+          files: [],
+          count: 0,
+          path: '/root/clawd/skills',
+          timestamp: '',
+        });
 
-      readFileMock.mockResolvedValue({ success: true, content: 'content', path: '', timestamp: '' });
+      readFileMock.mockResolvedValue({
+        success: true,
+        content: 'content',
+        path: '',
+        timestamp: '',
+      });
 
       const env = createMockEnv({ MOLTBOT_BUCKET: bucket as unknown as R2Bucket });
 
       await syncToR2(sandbox, env);
 
       expect(bucket.put).toHaveBeenCalledWith('workspace/IDENTITY.md', 'content');
-      expect(bucket.put).not.toHaveBeenCalledWith('workspace/skills/test/skill.json', expect.anything());
+      expect(bucket.put).not.toHaveBeenCalledWith(
+        'workspace/skills/test/skill.json',
+        expect.anything(),
+      );
     });
 
     it('uses legacy config dir when clawdbot.json exists', async () => {
@@ -160,21 +290,52 @@ describe('syncToR2', () => {
       const { sandbox, existsMock, listFilesMock, readFileMock } = createMockSandbox();
 
       existsMock
-        .mockResolvedValueOnce({ success: true, exists: false, path: '/root/.openclaw/openclaw.json', timestamp: '' })
-        .mockResolvedValueOnce({ success: true, exists: true, path: '/root/.clawdbot/clawdbot.json', timestamp: '' });
+        .mockResolvedValueOnce({
+          success: true,
+          exists: false,
+          path: '/root/.openclaw/openclaw.json',
+          timestamp: '',
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          exists: true,
+          path: '/root/.clawdbot/clawdbot.json',
+          timestamp: '',
+        });
 
       listFilesMock
         .mockResolvedValueOnce({
           success: true,
           files: [
-            { name: 'clawdbot.json', absolutePath: '/root/.clawdbot/clawdbot.json', type: 'file', size: 100, relativePath: 'clawdbot.json', modifiedAt: '', mode: '', permissions: {} },
+            {
+              name: 'clawdbot.json',
+              absolutePath: '/root/.clawdbot/clawdbot.json',
+              type: 'file',
+              size: 100,
+              relativePath: 'clawdbot.json',
+              modifiedAt: '',
+              mode: '',
+              permissions: {},
+            },
           ],
           count: 1,
           path: '/root/.clawdbot',
           timestamp: '',
         })
-        .mockResolvedValueOnce({ success: true, files: [], count: 0, path: '/root/clawd', timestamp: '' })
-        .mockResolvedValueOnce({ success: true, files: [], count: 0, path: '/root/clawd/skills', timestamp: '' });
+        .mockResolvedValueOnce({
+          success: true,
+          files: [],
+          count: 0,
+          path: '/root/clawd',
+          timestamp: '',
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          files: [],
+          count: 0,
+          path: '/root/clawd/skills',
+          timestamp: '',
+        });
 
       readFileMock.mockResolvedValue({ success: true, content: '{}', path: '', timestamp: '' });
 
@@ -182,7 +343,10 @@ describe('syncToR2', () => {
 
       await syncToR2(sandbox, env);
 
-      expect(listFilesMock).toHaveBeenCalledWith('/root/.clawdbot', { recursive: true, includeHidden: true });
+      expect(listFilesMock).toHaveBeenCalledWith('/root/.clawdbot', {
+        recursive: true,
+        includeHidden: true,
+      });
     });
   });
 });

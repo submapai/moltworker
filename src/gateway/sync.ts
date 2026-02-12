@@ -58,8 +58,18 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
   const syncSteps = [
     { name: 'config', sourcePath: configDir, r2Prefix: 'openclaw/', excludeDirs: [] as string[] },
-    { name: 'workspace', sourcePath: '/root/clawd', r2Prefix: 'workspace/', excludeDirs: ['skills'] },
-    { name: 'skills', sourcePath: '/root/clawd/skills', r2Prefix: 'skills/', excludeDirs: [] as string[] },
+    {
+      name: 'workspace',
+      sourcePath: '/root/clawd',
+      r2Prefix: 'workspace/',
+      excludeDirs: ['skills'],
+    },
+    {
+      name: 'skills',
+      sourcePath: '/root/clawd/skills',
+      r2Prefix: 'skills/',
+      excludeDirs: [] as string[],
+    },
   ];
 
   try {
@@ -68,7 +78,10 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
       let files;
       try {
-        const result = await sandbox.listFiles(step.sourcePath, { recursive: true, includeHidden: true });
+        const result = await sandbox.listFiles(step.sourcePath, {
+          recursive: true,
+          includeHidden: true,
+        });
         files = result.files;
       } catch {
         // Directory may not exist (e.g., skills/ on first run)

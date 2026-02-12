@@ -7,4 +7,3 @@ export const MOLTBOT_PORT = 18789;
 
 /** Maximum time to wait for Moltbot to start (3 minutes) */
 export const STARTUP_TIMEOUT_MS = 180_000;
-

@@ -105,11 +105,19 @@ export function createMockSandbox(
   const mountBucketMock = vi.fn().mockResolvedValue(undefined);
   const listProcessesMock = vi.fn().mockResolvedValue(options.processes || []);
   const containerFetchMock = vi.fn();
-  const existsMock = vi.fn().mockResolvedValue({ success: true, exists: false, path: '', timestamp: '' });
-  const listFilesMock = vi.fn().mockResolvedValue({ success: true, files: [], count: 0, path: '', timestamp: '' });
-  const readFileMock = vi.fn().mockResolvedValue({ success: true, content: '', path: '', timestamp: '' });
+  const existsMock = vi
+    .fn()
+    .mockResolvedValue({ success: true, exists: false, path: '', timestamp: '' });
+  const listFilesMock = vi
+    .fn()
+    .mockResolvedValue({ success: true, files: [], count: 0, path: '', timestamp: '' });
+  const readFileMock = vi
+    .fn()
+    .mockResolvedValue({ success: true, content: '', path: '', timestamp: '' });
   const writeFileMock = vi.fn().mockResolvedValue({ success: true, path: '', timestamp: '' });
-  const mkdirMock = vi.fn().mockResolvedValue({ success: true, path: '', recursive: true, timestamp: '' });
+  const mkdirMock = vi
+    .fn()
+    .mockResolvedValue({ success: true, path: '', recursive: true, timestamp: '' });
 
   // Default: return empty stdout (not mounted), unless mounted: true
   const startProcessMock = vi
