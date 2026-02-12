@@ -294,6 +294,10 @@ if (dmAllowFrom.length > 0) {
 if (groupAllowFrom.length > 0) {
     blooio.groupAllowFrom = groupAllowFrom;
 }
+if (process.env.BLOOIO_SESSION_DM_SCOPE) {
+    blooio.session = asObject(blooio.session);
+    blooio.session.dmScope = process.env.BLOOIO_SESSION_DM_SCOPE;
+}
 
 config.channels.blooio = blooio;
 
