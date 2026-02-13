@@ -94,6 +94,14 @@ function parseCsvList(raw) {
         .filter(Boolean);
 }
 
+function parseBoolean(raw, fallback) {
+    if (raw === undefined || raw === null || raw === '') return fallback;
+    const normalized = String(raw).trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+    return fallback;
+}
+
 config.gateway = config.gateway || {};
 config.channels = config.channels || {};
 
@@ -290,13 +298,55 @@ if (groupAllowFrom.length > 0) {
 
 config.channels.blooio = blooio;
 
-// Bloo.io channel plugin registration
+// Email channel configuration
+const email = asObject(config.channels.email);
+if (process.env.EMAIL_FROM_ADDRESS) {
+    email.fromAddress = process.env.EMAIL_FROM_ADDRESS.trim();
+}
+if (process.env.EMAIL_OUTBOUND_WEBHOOK_URL) {
+    email.outboundWebhookUrl = process.env.EMAIL_OUTBOUND_WEBHOOK_URL.trim();
+}
+if (process.env.EMAIL_WEBHOOK_SECRET) {
+    email.webhookSecret = process.env.EMAIL_WEBHOOK_SECRET;
+}
+if (process.env.EMAIL_OUTBOUND_WEBHOOK_SECRET) {
+    email.outboundWebhookSecret = process.env.EMAIL_OUTBOUND_WEBHOOK_SECRET;
+}
+if (process.env.EMAIL_REQUIRE_WEBHOOK_SIGNATURE) {
+    email.requireWebhookSignature = parseBoolean(process.env.EMAIL_REQUIRE_WEBHOOK_SIGNATURE, true);
+}
+if (process.env.EMAIL_MAILCHANNELS_ENABLED) {
+    email.mailchannelsEnabled = parseBoolean(process.env.EMAIL_MAILCHANNELS_ENABLED, false);
+}
+email.dmPolicy = process.env.EMAIL_DM_POLICY || email.dmPolicy || 'allowlist';
+const emailAllowFrom = parseCsvList(process.env.EMAIL_DM_ALLOW_FROM).map((entry) => entry.toLowerCase());
+if (emailAllowFrom.length > 0) {
+    email.allowFrom = emailAllowFrom;
+}
+if (process.env.EMAIL_SUPPRESS_REPLY) {
+    email.suppressEmailReply = parseBoolean(process.env.EMAIL_SUPPRESS_REPLY, false);
+}
+if (process.env.EMAIL_SMS_ACK_ENABLED) {
+    email.smsAckEnabled = parseBoolean(process.env.EMAIL_SMS_ACK_ENABLED, false);
+}
+const emailSmsAckTo = parseCsvList(process.env.EMAIL_SMS_ACK_TO);
+if (emailSmsAckTo.length > 0) {
+    email.smsAckTo = emailSmsAckTo;
+}
+if (email.enabled === undefined) {
+    // Enabled by default; explicit false remains respected.
+    email.enabled = true;
+}
+config.channels.email = email;
+
+// Channel plugin registration
 // load.paths entries are directories OpenClaw scans for plugin subdirectories,
 // so we point to the parent — OpenClaw discovers the blooio plugin folder inside it.
 const blooioPluginPath = '/root/.openclaw/plugins';
 // plugins.entries keys are resolved by plugin ID (from openclaw.plugin.json),
 // not npm package name.
 const blooioPluginEntryKey = 'blooio';
+const emailPluginEntryKey = 'email';
 
 config.plugins = asObject(config.plugins);
 config.plugins.load = asObject(config.plugins.load);
@@ -311,6 +361,11 @@ if (blooioEntry.enabled === undefined) {
     blooioEntry.enabled = true;
 }
 config.plugins.entries[blooioPluginEntryKey] = blooioEntry;
+const emailEntry = asObject(config.plugins.entries[emailPluginEntryKey]);
+if (emailEntry.enabled === undefined) {
+    emailEntry.enabled = true;
+}
+config.plugins.entries[emailPluginEntryKey] = emailEntry;
 
 // Skills configuration – register /root/clawd/skills as an extra discovery dir
 // so the cloudflare-browser skill (and any future skills/) is available by default.

@@ -35,6 +35,10 @@ RUN mkdir -p /root/.openclaw \
 COPY submodules/channels/blooio/ /root/.openclaw/plugins/blooio/
 RUN cd /root/.openclaw/plugins/blooio && npm install --omit=dev 2>/dev/null || true
 
+# Copy Email channel plugin (registered at runtime via start-openclaw.sh config patch)
+COPY submodules/channels/email/ /root/.openclaw/plugins/email/
+RUN cd /root/.openclaw/plugins/email && npm install --omit=dev 2>/dev/null || true
+
 # Copy startup script
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh

@@ -83,6 +83,37 @@ describe('worker channel webhook routing', () => {
     expect(mocks.ensureMoltbotGateway).toHaveBeenCalledOnce();
   });
 
+  it('proxies /email/inbound without applying CF Access middleware', async () => {
+    const containerFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    mocks.getSandbox.mockReturnValue({
+      containerFetch,
+      wsConnect: vi.fn(),
+    });
+
+    const authMiddleware = vi.fn(async (c: any) => c.json({ error: 'Unauthorized' }, 401));
+    mocks.createAccessMiddleware.mockReturnValue(authMiddleware);
+
+    const req = new Request('https://example.com/email/inbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: 'owner@example.com', text: 'test' }),
+    });
+    const env = createMockEnv();
+    const res = await worker.fetch(req, env, createExecutionContext());
+
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(mocks.createAccessMiddleware).not.toHaveBeenCalled();
+    expect(authMiddleware).not.toHaveBeenCalled();
+    expect(containerFetch).toHaveBeenCalledWith(req, 18789);
+    expect(mocks.ensureMoltbotGateway).toHaveBeenCalledOnce();
+  });
+
   it('does not bypass validation for non-blooio lookalike paths', async () => {
     const containerFetch = vi.fn().mockResolvedValue(new Response('unexpected', { status: 200 }));
     mocks.getSandbox.mockReturnValue({
@@ -94,6 +125,29 @@ describe('worker channel webhook routing', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event: 'inbound_message' }),
+    });
+    const env = createMockEnv();
+    const res = await worker.fetch(req, env, createExecutionContext());
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: 'Configuration error',
+    });
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(mocks.ensureMoltbotGateway).not.toHaveBeenCalled();
+  });
+
+  it('does not bypass validation for non-email lookalike paths', async () => {
+    const containerFetch = vi.fn().mockResolvedValue(new Response('unexpected', { status: 200 }));
+    mocks.getSandbox.mockReturnValue({
+      containerFetch,
+      wsConnect: vi.fn(),
+    });
+
+    const req = new Request('https://example.com/emailing/inbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: 'owner@example.com', text: 'test' }),
     });
     const env = createMockEnv();
     const res = await worker.fetch(req, env, createExecutionContext());

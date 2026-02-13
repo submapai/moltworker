@@ -59,6 +59,7 @@ function matchesWebhookPath(pathname: string, webhookPath: string): boolean {
 
 function isPublicChannelWebhookPath(pathname: string, env: MoltbotEnv): boolean {
   if (matchesWebhookPath(pathname, '/blooio')) return true;
+  if (matchesWebhookPath(pathname, '/email/inbound')) return true;
   const bluebubblesPath = normalizeWebhookPath(
     env.BLUEBUBBLES_WEBHOOK_PATH || '/bluebubbles-webhook',
   );
@@ -177,7 +178,7 @@ app.route('/cdp', cdp);
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
 
-  // Skip validation for /blooio/* webhook paths (OpenClaw handles its own webhook auth)
+  // Skip validation for channel webhook paths (OpenClaw handles channel webhook auth)
   if (isPublicChannelWebhookPath(url.pathname, c.env)) {
     return next();
   }
@@ -222,7 +223,7 @@ app.use('*', async (c, next) => {
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
 
-  // Skip auth for /blooio/* webhook paths (OpenClaw handles its own webhook auth)
+  // Skip auth for channel webhook paths (OpenClaw handles channel webhook auth)
   if (isPublicChannelWebhookPath(url.pathname, c.env)) {
     return next();
   }

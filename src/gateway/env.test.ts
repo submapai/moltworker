@@ -101,6 +101,40 @@ describe('buildEnvVars', () => {
     expect(result.OPENCLAW_GATEWAY_TOKEN).toBe('my-token');
   });
 
+  it('includes email webhook and transport env vars when set', () => {
+    const env = createMockEnv({
+      EMAIL_WEBHOOK_SECRET: 'email-inbound-secret',
+      EMAIL_OUTBOUND_WEBHOOK_SECRET: 'email-outbound-secret',
+      EMAIL_OUTBOUND_WEBHOOK_URL: 'https://email-worker.example.com/email/send',
+      EMAIL_FROM_ADDRESS: 'agent@example.com',
+      EMAIL_MAILCHANNELS_ENABLED: 'false',
+      EMAIL_REQUIRE_WEBHOOK_SIGNATURE: 'true',
+    });
+    const result = buildEnvVars(env);
+    expect(result.EMAIL_WEBHOOK_SECRET).toBe('email-inbound-secret');
+    expect(result.EMAIL_OUTBOUND_WEBHOOK_SECRET).toBe('email-outbound-secret');
+    expect(result.EMAIL_OUTBOUND_WEBHOOK_URL).toBe('https://email-worker.example.com/email/send');
+    expect(result.EMAIL_FROM_ADDRESS).toBe('agent@example.com');
+    expect(result.EMAIL_MAILCHANNELS_ENABLED).toBe('false');
+    expect(result.EMAIL_REQUIRE_WEBHOOK_SIGNATURE).toBe('true');
+  });
+
+  it('includes email policy and SMS receipt env vars when set', () => {
+    const env = createMockEnv({
+      EMAIL_DM_POLICY: 'allowlist',
+      EMAIL_DM_ALLOW_FROM: 'owner@example.com',
+      EMAIL_SUPPRESS_REPLY: 'true',
+      EMAIL_SMS_ACK_ENABLED: 'true',
+      EMAIL_SMS_ACK_TO: '+15550001111',
+    });
+    const result = buildEnvVars(env);
+    expect(result.EMAIL_DM_POLICY).toBe('allowlist');
+    expect(result.EMAIL_DM_ALLOW_FROM).toBe('owner@example.com');
+    expect(result.EMAIL_SUPPRESS_REPLY).toBe('true');
+    expect(result.EMAIL_SMS_ACK_ENABLED).toBe('true');
+    expect(result.EMAIL_SMS_ACK_TO).toBe('+15550001111');
+  });
+
   // Bloo.io tokens
   it('includes BLOOIO_API_KEY when set', () => {
     const env = createMockEnv({ BLOOIO_API_KEY: 'bloo-key' });

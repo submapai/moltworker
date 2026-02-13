@@ -29,6 +29,17 @@ export interface MoltbotEnv {
   TELEGRAM_DM_ALLOW_FROM?: string; // Comma-separated Telegram DM allowlist
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
+  EMAIL_WEBHOOK_SECRET?: string; // HMAC secret for inbound email webhook verification
+  EMAIL_OUTBOUND_WEBHOOK_SECRET?: string; // HMAC secret for outbound /email/send webhook calls
+  EMAIL_OUTBOUND_WEBHOOK_URL?: string; // HTTPS endpoint for outbound email delivery (e.g. /email/send worker route)
+  EMAIL_FROM_ADDRESS?: string; // Outbound sender address for channel replies
+  EMAIL_MAILCHANNELS_ENABLED?: string; // Set to 'true' or 'false' for direct MailChannels fallback
+  EMAIL_REQUIRE_WEBHOOK_SIGNATURE?: string; // Set to 'true' or 'false' to require inbound signature verification
+  EMAIL_DM_POLICY?: string; // open | pairing | allowlist | disabled
+  EMAIL_DM_ALLOW_FROM?: string; // Comma-separated inbound sender allowlist
+  EMAIL_SUPPRESS_REPLY?: string; // Set to 'true' to suppress email replies from the agent
+  EMAIL_SMS_ACK_ENABLED?: string; // Set to 'true' to send SMS receipt acknowledgements
+  EMAIL_SMS_ACK_TO?: string; // Comma-separated SMS/E.164 targets for email receipt acknowledgements
   BLOOIO_API_KEY?: string; // Bloo.io Bearer API key for outbound messages
   BLOOIO_WEBHOOK_SECRET?: string; // HMAC secret for inbound webhook verification
   BLOOIO_OUTBOUND?: string; // Set to 'true' or 'false' to enable/disable outbound sending
