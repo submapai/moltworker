@@ -408,8 +408,8 @@ fi
 # ============================================================
 # GOOGLE CREDENTIALS
 # ============================================================
-if [ -n "$GOOG_SECRET" ]; then
-    echo "$GOOG_SECRET" > /root/client_secret.json
+if [ -n "$GOOGLE_SECRET" ]; then
+    echo "$GOOGLE_SECRET" > /root/client_secret.json
     gog auth credentials /root/client_secret.json
     echo "Google credentials written to /root/client_secret.json"
 
