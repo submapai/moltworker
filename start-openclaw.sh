@@ -298,6 +298,23 @@ if (groupAllowFrom.length > 0) {
 
 config.channels.blooio = blooio;
 
+// Linq channel configuration
+const linq = asObject(config.channels.linq);
+if (process.env.LINQ_API_KEY) {
+    linq.apiKey = process.env.LINQ_API_KEY;
+}
+if (process.env.LINQ_FROM_PHONE) {
+    linq.fromPhone = process.env.LINQ_FROM_PHONE;
+}
+if (linq.enabled === undefined) {
+    linq.enabled = true;
+}
+linq.running = true;
+linq.outbound = true;
+linq.session = asObject(linq.session);
+linq.session.dmScope = 'per-channel-peer';
+config.channels.linq = linq;
+
 // Email channel configuration
 const email = asObject(config.channels.email);
 if (process.env.EMAIL_FROM_ADDRESS) {
@@ -346,6 +363,7 @@ const blooioPluginPath = '/root/.openclaw/plugins';
 // plugins.entries keys are resolved by plugin ID (from openclaw.plugin.json),
 // not npm package name.
 const blooioPluginEntryKey = 'blooio';
+const linqPluginEntryKey = 'linq';
 const emailPluginEntryKey = 'email';
 
 config.plugins = asObject(config.plugins);
@@ -361,6 +379,11 @@ if (blooioEntry.enabled === undefined) {
     blooioEntry.enabled = true;
 }
 config.plugins.entries[blooioPluginEntryKey] = blooioEntry;
+const linqEntry = asObject(config.plugins.entries[linqPluginEntryKey]);
+if (linqEntry.enabled === undefined) {
+    linqEntry.enabled = true;
+}
+config.plugins.entries[linqPluginEntryKey] = linqEntry;
 const emailEntry = asObject(config.plugins.entries[emailPluginEntryKey]);
 if (emailEntry.enabled === undefined) {
     emailEntry.enabled = true;
