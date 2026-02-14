@@ -395,6 +395,31 @@ console.log('Configuration patched successfully');
 EOFPATCH
 
 # ============================================================
+# INSTALL GOG CLI
+# ============================================================
+if ! command -v gog &> /dev/null; then
+    echo "Installing gog CLI..."
+    curl -fsSL https://github.com/steipete/gogcli/releases/download/v0.10.0/gogcli_0.10.0_linux_amd64.tar.gz -o /tmp/gogcli.tar.gz \
+        && tar -xzf /tmp/gogcli.tar.gz -C /usr/local/bin gog \
+        && rm /tmp/gogcli.tar.gz \
+        && echo "gog CLI installed: $(gog --version 2>/dev/null || echo 'ok')"
+fi
+
+# ============================================================
+# GOOGLE CREDENTIALS
+# ============================================================
+if [ -n "$GOOG_SECRET" ]; then
+    echo "$GOOG_SECRET" > /root/client_secret.json
+    gog auth credentials /root/client_secret.json
+    echo "Google credentials written to /root/client_secret.json"
+
+    if [ -n "$GOOG_EMAIL" ] && echo "$GOOG_EMAIL" | grep -qi "@gmail\.com"; then
+        echo "Adding Google Calendar for $GOOG_EMAIL..."
+        gog auth add "$GOOG_EMAIL" --services calendar
+    fi
+fi
+
+# ============================================================
 # START GATEWAY
 # ============================================================
 echo "Starting OpenClaw Gateway..."
