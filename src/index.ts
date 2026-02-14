@@ -59,6 +59,7 @@ function matchesWebhookPath(pathname: string, webhookPath: string): boolean {
 
 function isPublicChannelWebhookPath(pathname: string, env: MoltbotEnv): boolean {
   if (matchesWebhookPath(pathname, '/blooio')) return true;
+  if (matchesWebhookPath(pathname, '/linq')) return true;
   if (matchesWebhookPath(pathname, '/email/inbound')) return true;
   const bluebubblesPath = normalizeWebhookPath(
     env.BLUEBUBBLES_WEBHOOK_PATH || '/bluebubbles-webhook',
