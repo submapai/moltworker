@@ -17,6 +17,11 @@ let lastListErrorAt = 0;
 let startInFlight: Promise<Process> | null = null;
 let lastStartAttemptAt = 0;
 
+function isDurableObjectReset(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.message.includes('Durable Object reset because its code was updated');
+}
+
 async function listProcessesCached(sandbox: Sandbox): Promise<Process[]> {
   const now = Date.now();
   if (cachedProcesses && now - cachedAt < PROCESS_LIST_TTL_MS) {
@@ -141,6 +146,23 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
  * @returns The running gateway process
  */
 export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): Promise<Process> {
+  try {
+    return await ensureMoltbotGatewayInner(sandbox, env);
+  } catch (err) {
+    if (isDurableObjectReset(err)) {
+      console.log('[Gateway] Durable Object was reset after code update, retrying...');
+      // Clear stale state so the retry starts fresh
+      startInFlight = null;
+      cachedProcesses = null;
+      cachedAt = 0;
+      lastStartAttemptAt = 0;
+      return ensureMoltbotGatewayInner(sandbox, env);
+    }
+    throw err;
+  }
+}
+
+async function ensureMoltbotGatewayInner(sandbox: Sandbox, env: MoltbotEnv): Promise<Process> {
   if (startInFlight) {
     return startInFlight;
   }
