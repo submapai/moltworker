@@ -92,7 +92,8 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
     }
   }
 
-  // Check for AI provider configuration (at least one must be set)
+  // AI provider: prefer Cloudflare AI Gateway, fall back to direct keys.
+  // Not having an AI key should not block startup (webhooks, health checks, etc. still work).
   const hasCloudflareGateway = !!(
     env.CLOUDFLARE_AI_GATEWAY_API_KEY &&
     env.CF_AI_GATEWAY_ACCOUNT_ID &&
@@ -103,9 +104,7 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
   const hasOpenAIKey = !!env.OPENAI_API_KEY;
 
   if (!hasCloudflareGateway && !hasLegacyGateway && !hasAnthropicKey && !hasOpenAIKey) {
-    missing.push(
-      'ANTHROPIC_API_KEY, OPENAI_API_KEY, or CLOUDFLARE_AI_GATEWAY_API_KEY + CF_AI_GATEWAY_ACCOUNT_ID + CF_AI_GATEWAY_GATEWAY_ID',
-    );
+    console.warn('[CONFIG] No AI provider configured — AI features will be unavailable');
   }
 
   return missing;
