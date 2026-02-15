@@ -492,10 +492,15 @@ async function scheduled(
     const options = buildSandboxOptions(env);
     const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
 
-    const gatewayProcess = await findExistingMoltbotProcess(sandbox);
+    let gatewayProcess = await findExistingMoltbotProcess(sandbox);
     if (!gatewayProcess) {
-      console.log('[cron] Gateway not running yet, skipping sync');
-      return;
+      console.log('[cron] Gateway not running, starting it as safety net');
+      await ensureMoltbotGateway(sandbox, env);
+      gatewayProcess = await findExistingMoltbotProcess(sandbox);
+      if (!gatewayProcess) {
+        console.error('[cron] Gateway still not running after startup attempt');
+        return;
+      }
     }
 
     console.log('[cron] Starting backup sync to R2...');
