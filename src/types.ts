@@ -47,7 +47,8 @@ export interface MoltbotEnv {
   BLOOIO_GROUP_POLICY?: string; // open | allowlist | disabled
   BLOOIO_DM_ALLOW_FROM?: string; // Comma-separated Bloo.io DM allowlist
   BLOOIO_GROUP_ALLOW_FROM?: string; // Comma-separated Bloo.io group allowlist
-  LINQ_API_KEY?: string; // Linq Bearer API key (also used as webhook signing secret)
+  LINQ_API_KEY?: string; // Linq Bearer API key
+  LINQ_WEBHOOK_SECRET?: string; // HMAC secret for inbound webhook verification
   LINQ_FROM_PHONE?: string; // E.164 phone number for outbound
   BLUEBUBBLES_SERVER_URL?: string; // BlueBubbles REST API URL, e.g. http://192.168.1.100:1234
   BLUEBUBBLES_PASSWORD?: string; // BlueBubbles API password
