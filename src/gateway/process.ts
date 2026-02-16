@@ -17,6 +17,9 @@ let lastListErrorAt = 0;
 let startInFlight: Promise<Process> | null = null;
 let lastStartAttemptAt = 0;
 
+// Process IDs that returned 404 on kill — skip re-killing on subsequent calls
+const unkillableIds = new Set<string>();
+
 function isDurableObjectReset(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.message.includes('Durable Object reset because its code was updated');
@@ -60,11 +63,12 @@ export function getProcessListHealth(): { lastError: string | null; lastErrorAt:
   return { lastError: lastListError, lastErrorAt: lastListErrorAt };
 }
 
-/** Reset cached process list (for tests) */
+/** Reset cached process list (for tests or DO resets) */
 export function resetProcessCache(): void {
   cachedProcesses = null;
   cachedAt = 0;
   listInFlight = null;
+  unkillableIds.clear();
 }
 
 /**
@@ -115,14 +119,16 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
     }
   }
 
-  // Clean up zombies to prevent accumulation
-  if (zombiesToKill.length > 0) {
-    console.log(`[Process] Cleaning up ${zombiesToKill.length} zombie process(es)`);
-    for (const zombie of zombiesToKill) {
+  // Clean up zombies to prevent accumulation (skip IDs that already 404'd)
+  const killable = zombiesToKill.filter((z) => !unkillableIds.has(z.id));
+  if (killable.length > 0) {
+    console.log(`[Process] Cleaning up ${killable.length} zombie process(es)`);
+    for (const zombie of killable) {
       try {
         await zombie.kill();
       } catch {
-        // Already dead or can't be killed — ignore
+        // 404 or already dead — remember so we don't retry
+        unkillableIds.add(zombie.id);
       }
     }
     // Invalidate cache since we just killed processes
@@ -156,6 +162,7 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
       cachedProcesses = null;
       cachedAt = 0;
       lastStartAttemptAt = 0;
+      unkillableIds.clear();
       return ensureMoltbotGatewayInner(sandbox, env);
     }
     throw err;
