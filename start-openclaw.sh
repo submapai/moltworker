@@ -425,14 +425,9 @@ if [ -n "$GOOGLE_SECRET" ]; then
     gog auth credentials /root/client_secret.json
     echo "Google credentials written to /root/client_secret.json"
 
-    if [ -n "$GOOGLE_EMAIL" ] && echo "$GOOGLE_EMAIL" | grep -qi "@gmail\.com"; then
-        if gog auth list 2>/dev/null | grep -qi "$GOOGLE_EMAIL"; then
-            echo "Google Calendar already configured for $GOOGLE_EMAIL"
-        else
-            echo "Adding Google Calendar for $GOOGLE_EMAIL..."
-            gog auth add "$GOOGLE_EMAIL" --services calendar
-        fi
-    fi
+    # NOTE: gog auth add requires interactive OAuth (browser flow) and cannot
+    # run in a headless container. Google Calendar auth is handled via the
+    # google-auth skill at runtime instead.
 fi
 
 # ============================================================
