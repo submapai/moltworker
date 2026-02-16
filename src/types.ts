@@ -75,6 +75,8 @@ export interface MoltbotEnv {
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
+  GOOGLE_SECRET?: string; // Google OAuth client_secret.json content for gog CLI
+  GOOG_EMAIL?: string; // Google account email for gog CLI auth
 }
 
 /**

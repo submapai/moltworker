@@ -93,5 +93,7 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.OPENCLAW_TRUSTED_PROXIES) envVars.OPENCLAW_TRUSTED_PROXIES = env.OPENCLAW_TRUSTED_PROXIES;
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
+  if (env.GOOGLE_SECRET) envVars.GOOGLE_SECRET = env.GOOGLE_SECRET;
+  if (env.GOOG_EMAIL) envVars.GOOG_EMAIL = env.GOOG_EMAIL;
   return envVars;
 }
