@@ -43,6 +43,15 @@ RUN cd /root/.openclaw/plugins/linq && npm install --omit=dev 2>/dev/null || tru
 COPY submodules/channels/email/ /root/.openclaw/plugins/email/
 RUN cd /root/.openclaw/plugins/email && npm install --omit=dev 2>/dev/null || true
 
+# Install gog CLI (Google Workspace: Gmail, Calendar, Drive, Contacts, Sheets, Docs)
+# Fetch latest release from GitHub for the container architecture
+RUN ARCH="$(dpkg --print-architecture)" \
+    && GOG_VERSION=$(curl -fsSL https://api.github.com/repos/steipete/gogcli/releases/latest | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/') \
+    && curl -fsSL "https://github.com/steipete/gogcli/releases/download/v${GOG_VERSION}/gogcli_${GOG_VERSION}_linux_${ARCH}.tar.gz" -o /tmp/gogcli.tar.gz \
+    && tar -xzf /tmp/gogcli.tar.gz -C /usr/local/bin gog \
+    && rm /tmp/gogcli.tar.gz \
+    && echo "gog CLI installed: $(gog --version 2>/dev/null || echo 'ok')"
+
 # Copy startup script
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh

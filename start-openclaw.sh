@@ -418,17 +418,6 @@ console.log('Configuration patched successfully');
 EOFPATCH
 
 # ============================================================
-# INSTALL GOG CLI
-# ============================================================
-if ! command -v gog &> /dev/null; then
-    echo "Installing gog CLI..."
-    curl -fsSL https://github.com/steipete/gogcli/releases/download/v0.10.0/gogcli_0.10.0_linux_amd64.tar.gz -o /tmp/gogcli.tar.gz \
-        && tar -xzf /tmp/gogcli.tar.gz -C /usr/local/bin gog \
-        && rm /tmp/gogcli.tar.gz \
-        && echo "gog CLI installed: $(gog --version 2>/dev/null || echo 'ok')"
-fi
-
-# ============================================================
 # GOOGLE CREDENTIALS
 # ============================================================
 if [ -n "$GOOGLE_SECRET" ]; then
