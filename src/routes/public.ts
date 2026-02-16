@@ -69,6 +69,12 @@ publicRoutes.get('/api/status', async (c) => {
   }
 });
 
+// GET /assets/* - Serve static assets directly from ASSETS binding
+// Prevents asset requests from falling through to the gateway proxy
+publicRoutes.get('/assets/*', (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
+});
+
 // GET /_admin/assets/* - Admin UI static assets (CSS, JS need to load for login redirect)
 // Assets are built to dist/client with base "/_admin/"
 publicRoutes.get('/_admin/assets/*', async (c) => {

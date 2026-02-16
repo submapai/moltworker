@@ -180,23 +180,31 @@ export async function restoreFromR2(sandbox: Sandbox, env: MoltbotEnv): Promise<
           ...(cursor ? { cursor } : {}),
         });
 
-        for (const obj of listResult.objects) {
-          const relPath = obj.key.slice(step.r2Prefix.length);
-          if (!relPath) continue; // skip the prefix itself
+        const BATCH_SIZE = 5;
+        const objects = listResult.objects.filter(
+          (obj) => obj.key.slice(step.r2Prefix.length).length > 0,
+        );
 
-          const targetFile = `${step.targetPath}/${relPath}`;
+        for (let i = 0; i < objects.length; i += BATCH_SIZE) {
+          const batch = objects.slice(i, i + BATCH_SIZE);
+          await Promise.all(
+            batch.map(async (obj) => {
+              const relPath = obj.key.slice(step.r2Prefix.length);
+              const targetFile = `${step.targetPath}/${relPath}`;
 
-          // Ensure parent directory exists
-          const parentDir = targetFile.slice(0, targetFile.lastIndexOf('/'));
-          await sandbox.mkdir(parentDir, { recursive: true });
+              // Ensure parent directory exists
+              const parentDir = targetFile.slice(0, targetFile.lastIndexOf('/'));
+              await sandbox.mkdir(parentDir, { recursive: true });
 
-          // Fetch the object content
-          const r2Obj = await bucket.get(obj.key);
-          if (!r2Obj) continue;
+              // Fetch the object content
+              const r2Obj = await bucket.get(obj.key);
+              if (!r2Obj) return;
 
-          const content = await r2Obj.text();
-          await sandbox.writeFile(targetFile, content);
-          objectCount++;
+              const content = await r2Obj.text();
+              await sandbox.writeFile(targetFile, content);
+              objectCount++;
+            }),
+          );
         }
 
         cursor = listResult.truncated ? (listResult as any).cursor : undefined;

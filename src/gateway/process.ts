@@ -6,7 +6,7 @@ import { restoreFromR2 } from './sync';
 
 const PROCESS_LIST_TTL_MS = 3000;
 const PROCESS_LIST_STALE_MS = 15000;
-const START_THROTTLE_MS = 15000;
+const START_THROTTLE_MS = 5000;
 
 let cachedProcesses: Process[] | null = null;
 let cachedAt = 0;
