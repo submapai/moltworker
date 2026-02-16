@@ -425,12 +425,12 @@ if [ -n "$GOOGLE_SECRET" ]; then
     gog auth credentials /root/client_secret.json
     echo "Google credentials written to /root/client_secret.json"
 
-    if [ -n "$GOOG_EMAIL" ] && echo "$GOOG_EMAIL" | grep -qi "@gmail\.com"; then
-        if gog auth list 2>/dev/null | grep -qi "$GOOG_EMAIL"; then
-            echo "Google Calendar already configured for $GOOG_EMAIL"
+    if [ -n "$GOOGLE_EMAIL" ] && echo "$GOOGLE_EMAIL" | grep -qi "@gmail\.com"; then
+        if gog auth list 2>/dev/null | grep -qi "$GOOGLE_EMAIL"; then
+            echo "Google Calendar already configured for $GOOGLE_EMAIL"
         else
-            echo "Adding Google Calendar for $GOOG_EMAIL..."
-            gog auth add "$GOOG_EMAIL" --services calendar
+            echo "Adding Google Calendar for $GOOGLE_EMAIL..."
+            gog auth add "$GOOGLE_EMAIL" --services calendar
         fi
     fi
 fi

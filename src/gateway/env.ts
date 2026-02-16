@@ -94,6 +94,6 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
   if (env.GOOGLE_SECRET) envVars.GOOGLE_SECRET = env.GOOGLE_SECRET;
-  if (env.GOOG_EMAIL) envVars.GOOG_EMAIL = env.GOOG_EMAIL;
+  if (env.GOOGLE_EMAIL) envVars.GOOGLE_EMAIL = env.GOOGLE_EMAIL;
   return envVars;
 }
