@@ -174,9 +174,13 @@
             statusEl.textContent = 'Redirecting...';
             document.querySelector('.spinner').style.display = 'none';
 
-            // Small delay so user sees the "ready" message
+            // Small delay so user sees the "ready" message, then redirect
+            // with _ready=1 so the catch-all waits for the gateway instead
+            // of potentially serving the loading page again
             setTimeout(() => {
-              window.location.reload();
+              const url = new URL(window.location.href);
+              url.searchParams.set('_ready', '1');
+              window.location.href = url.toString();
             }, 500);
             return;
           }

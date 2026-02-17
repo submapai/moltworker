@@ -259,7 +259,7 @@ app.route('/debug', debug);
 
 app.all('*', async (c) => {
   const sandbox = c.get('sandbox');
-  const request = c.req.raw;
+  let request = c.req.raw;
   const url = new URL(request.url);
 
   console.log('[PROXY] Handling request:', url.pathname);
@@ -272,7 +272,10 @@ app.all('*', async (c) => {
   const isWebSocketRequest = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
   const acceptsHtml = request.headers.get('Accept')?.includes('text/html');
 
-  if (!isGatewayReady && !isWebSocketRequest && acceptsHtml) {
+  // If the loading page sent us here with _ready=1, skip the loading page and wait for the gateway
+  const isReadyRedirect = url.searchParams.has('_ready');
+
+  if (!isGatewayReady && !isWebSocketRequest && acceptsHtml && !isReadyRedirect) {
     console.log('[PROXY] Gateway not ready, serving loading page');
 
     // Start the gateway in the background (don't await)
@@ -461,6 +464,12 @@ app.all('*', async (c) => {
       status: 101,
       webSocket: clientWs,
     });
+  }
+
+  // Strip internal params before proxying to gateway
+  if (url.searchParams.has('_ready')) {
+    url.searchParams.delete('_ready');
+    request = new Request(url.toString(), request);
   }
 
   console.log('[HTTP] Proxying:', url.pathname + url.search);
