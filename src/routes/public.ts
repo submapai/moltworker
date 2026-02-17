@@ -69,10 +69,17 @@ publicRoutes.get('/api/status', async (c) => {
   }
 });
 
-// GET /assets/* - Serve static assets directly from ASSETS binding
-// Prevents asset requests from falling through to the gateway proxy
-publicRoutes.get('/assets/*', (c) => {
-  return c.env.ASSETS.fetch(c.req.raw);
+// GET /assets/* - Serve static assets from ASSETS binding, fallback to gateway proxy
+// Our ASSETS binding has admin UI assets; the OpenClaw gateway serves its own UI assets.
+// Try ASSETS first, proxy to gateway if not found.
+publicRoutes.get('/assets/*', async (c) => {
+  const response = await c.env.ASSETS.fetch(c.req.raw);
+  if (response.ok) {
+    return response;
+  }
+  // Not in ASSETS binding — proxy to the OpenClaw gateway
+  const sandbox = c.get('sandbox');
+  return sandbox.containerFetch(c.req.raw, MOLTBOT_PORT);
 });
 
 // GET /_admin/assets/* - Admin UI static assets (CSS, JS need to load for login redirect)
