@@ -7,6 +7,17 @@ import { handleBlooioWebhookRequest } from '../submodules/channels/blooio/src/we
 function createRuntimeStub() {
   const recordInboundSession = vi.fn(async () => {});
   const finalizeInboundContext = vi.fn((ctx: any) => ctx);
+  const saveMediaBuffer = vi.fn(async (_buffer: Buffer, contentType?: string) => {
+    const mime = contentType || 'application/octet-stream';
+    const ext = mime === 'application/pdf' ? '.pdf'
+      : mime === 'image/png' ? '.png'
+      : mime === 'image/jpeg' ? '.jpg'
+      : '.bin';
+    return {
+      path: `/tmp/test-media${ext}`,
+      contentType: mime,
+    };
+  });
   return {
     runtime: {
       channel: {
@@ -21,6 +32,9 @@ function createRuntimeStub() {
           resolveStorePath: vi.fn(() => '/tmp/sessions'),
           recordInboundSession,
         },
+        media: {
+          saveMediaBuffer,
+        },
         reply: {
           resolveEnvelopeFormatOptions: vi.fn(() => ({})),
           formatInboundEnvelope: vi.fn(() => 'formatted inbound'),
@@ -31,6 +45,7 @@ function createRuntimeStub() {
     },
     recordInboundSession,
     finalizeInboundContext,
+    saveMediaBuffer,
   };
 }
 
@@ -71,6 +86,7 @@ async function postInboundWebhook(opts: {
   logger: ReturnType<typeof createLogger>;
   finalizeInboundContext: ReturnType<typeof vi.fn>;
   recordInboundSession: ReturnType<typeof vi.fn>;
+  saveMediaBuffer: ReturnType<typeof vi.fn>;
 }> {
   const logger = createLogger();
   const runtime = createRuntimeStub();
@@ -128,6 +144,7 @@ async function postInboundWebhook(opts: {
     logger,
     finalizeInboundContext: runtime.finalizeInboundContext,
     recordInboundSession: runtime.recordInboundSession,
+    saveMediaBuffer: runtime.saveMediaBuffer,
   };
 }
 
@@ -224,6 +241,7 @@ describe('blooio webhook', () => {
         MediaType: 'image/jpeg',
       }),
     );
+    expect(result.saveMediaBuffer).toHaveBeenCalledTimes(1);
     expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
   });
 
@@ -332,6 +350,61 @@ describe('blooio webhook', () => {
     // Should NOT have MediaPaths since download failed
     const ctx = result.finalizeInboundContext.mock.calls[0]?.[0];
     expect(ctx?.MediaPaths).toBeUndefined();
+    expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries attachment download without auth when authenticated fetch fails', async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+      const authHeader = (init?.headers as Record<string, string> | undefined)?.Authorization;
+      if (urlStr === 'https://bucket.blooio.com/api-attachments/photo.jpg') {
+        if (authHeader) {
+          return new Response('not found', { status: 404 });
+        }
+        return new Response(Buffer.from('fake-image-data'), {
+          status: 200,
+          headers: { 'Content-Type': 'image/jpeg' },
+        });
+      }
+      return new Response(null, { status: 200 });
+    });
+    globalThis.fetch = fetchMock as any;
+
+    const imageUrl = 'https://bucket.blooio.com/api-attachments/photo.jpg';
+    const result = await postInboundWebhook({
+      getConfig: () => ({
+        channels: {
+          blooio: {
+            enabled: true,
+            apiKey: 'blooio:test-api-key',
+          },
+        },
+      }),
+      payload: {
+        event: 'message.received',
+        message_id: 'msg-media-auth-retry',
+        external_id: '+15712170005',
+        timestamp: 1770836813397,
+        text: 'Who is this?',
+        sender: '+15712170005',
+        attachments: [{ url: imageUrl }],
+      },
+    });
+
+    const downloadCalls = fetchMock.mock.calls.filter((call) => {
+      const target = call[0];
+      const urlStr = typeof target === 'string' ? target : target instanceof URL ? target.toString() : target.url;
+      return urlStr === imageUrl;
+    });
+
+    expect(downloadCalls).toHaveLength(2);
+    expect(result.status).toBe(202);
+    expect(result.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        MediaPaths: expect.arrayContaining([expect.stringContaining('.jpg')]),
+        MediaUrls: [imageUrl],
+      }),
+    );
     expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
   });
 });
