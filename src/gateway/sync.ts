@@ -9,11 +9,27 @@ export interface SyncResult {
 }
 
 /** File extensions to exclude from backup */
-const EXCLUDED_EXTENSIONS = ['.lock', '.log', '.tmp'];
+const EXCLUDED_EXTENSIONS = ['.lock', '.log', '.tmp', '.sample'];
+
+/** Directory names to always exclude from sync */
+const EXCLUDED_DIRS = ['.git', 'node_modules'];
 
 /** Check if a file should be excluded from sync */
 function shouldExclude(filePath: string): boolean {
-  return EXCLUDED_EXTENSIONS.some((ext) => filePath.endsWith(ext));
+  if (EXCLUDED_EXTENSIONS.some((ext) => filePath.endsWith(ext))) return true;
+  // Exclude .bak files (e.g. session.jsonl.bak-1234-timestamp)
+  if (/\.bak(?:[.-]|$)/.test(filePath)) return true;
+  // Exclude directories like .git/ and node_modules/
+  const parts = filePath.split('/');
+  if (parts.some((p) => EXCLUDED_DIRS.includes(p))) return true;
+  return false;
+}
+
+/** Session .jsonl files — large and not needed for gateway startup */
+const SESSION_DIR_PATTERN = /\/agents\/[^/]+\/sessions\//;
+
+function isSessionFile(relPath: string): boolean {
+  return SESSION_DIR_PATTERN.test(relPath) && relPath.endsWith('.jsonl');
 }
 
 /**
@@ -91,10 +107,9 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
       for (const file of files) {
         if (file.type !== 'file') continue;
-        if (shouldExclude(file.name)) continue;
 
-        // Check excluded directories
         const relPath = file.absolutePath.slice(step.sourcePath.length + 1);
+        if (shouldExclude(file.absolutePath)) continue;
         if (step.excludeDirs.some((dir) => relPath.startsWith(dir + '/'))) continue;
 
         const r2Key = step.r2Prefix + relPath;
@@ -146,7 +161,10 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
  * - R2: workspace/ → /root/clawd/
  * - R2: skills/ → /root/clawd/skills/
  */
-export async function restoreFromR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncResult> {
+export async function restoreFromR2(
+  sandbox: Sandbox,
+  env: MoltbotEnv,
+): Promise<SyncResult & { deferredKeys?: string[] }> {
   const bucket = env.MOLTBOT_BUCKET;
   if (!bucket) {
     return { success: false, error: 'R2 storage is not configured' };
@@ -165,6 +183,8 @@ export async function restoreFromR2(sandbox: Sandbox, env: MoltbotEnv): Promise<
     { r2Prefix: 'workspace/', targetPath: '/root/clawd' },
     { r2Prefix: 'skills/', targetPath: '/root/clawd/skills' },
   ];
+
+  const deferredKeys: string[] = [];
 
   try {
     for (const step of restoreSteps) {
@@ -185,8 +205,20 @@ export async function restoreFromR2(sandbox: Sandbox, env: MoltbotEnv): Promise<
           (obj) => obj.key.slice(step.r2Prefix.length).length > 0,
         );
 
-        for (let i = 0; i < objects.length; i += BATCH_SIZE) {
-          const batch = objects.slice(i, i + BATCH_SIZE);
+        // Separate deferred (large session files) from immediate
+        const immediate: typeof objects = [];
+        for (const obj of objects) {
+          const relPath = obj.key.slice(step.r2Prefix.length);
+          if (shouldExclude(relPath)) continue;
+          if (isSessionFile('/' + relPath)) {
+            deferredKeys.push(obj.key);
+          } else {
+            immediate.push(obj);
+          }
+        }
+
+        for (let i = 0; i < immediate.length; i += BATCH_SIZE) {
+          const batch = immediate.slice(i, i + BATCH_SIZE);
           await Promise.all(
             batch.map(async (obj) => {
               const relPath = obj.key.slice(step.r2Prefix.length);
@@ -213,8 +245,11 @@ export async function restoreFromR2(sandbox: Sandbox, env: MoltbotEnv): Promise<
       console.log(`[restore] Restored ${objectCount} files to ${step.targetPath}`);
     }
 
+    if (deferredKeys.length > 0) {
+      console.log(`[restore] Deferred ${deferredKeys.length} session file(s) for background restore`);
+    }
     console.log('[restore] Restore completed from backup at', lastSync);
-    return { success: true, lastSync };
+    return { success: true, lastSync, deferredKeys };
   } catch (err) {
     return {
       success: false,
@@ -222,4 +257,60 @@ export async function restoreFromR2(sandbox: Sandbox, env: MoltbotEnv): Promise<
       details: err instanceof Error ? err.message : 'Unknown error',
     };
   }
+}
+
+/**
+ * Restore deferred session files from R2 in the background.
+ * Called after the gateway is already running.
+ */
+export async function restoreDeferredFiles(
+  sandbox: Sandbox,
+  env: MoltbotEnv,
+  keys: string[],
+): Promise<void> {
+  const bucket = env.MOLTBOT_BUCKET;
+  if (!bucket || keys.length === 0) return;
+
+  console.log(`[restore] Background: restoring ${keys.length} deferred session file(s)`);
+  const BATCH_SIZE = 3;
+
+  // Map R2 keys back to target paths
+  const prefixMap: Record<string, string> = {
+    'openclaw/': '/root/.openclaw',
+    'workspace/': '/root/clawd',
+    'skills/': '/root/clawd/skills',
+  };
+
+  for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+    const batch = keys.slice(i, i + BATCH_SIZE);
+    await Promise.all(
+      batch.map(async (key) => {
+        // Find the matching prefix
+        let targetPath = '';
+        let relPath = '';
+        for (const [prefix, target] of Object.entries(prefixMap)) {
+          if (key.startsWith(prefix)) {
+            targetPath = target;
+            relPath = key.slice(prefix.length);
+            break;
+          }
+        }
+        if (!targetPath || !relPath) return;
+
+        const targetFile = `${targetPath}/${relPath}`;
+        const parentDir = targetFile.slice(0, targetFile.lastIndexOf('/'));
+
+        try {
+          await sandbox.mkdir(parentDir, { recursive: true });
+          const r2Obj = await bucket.get(key);
+          if (!r2Obj) return;
+          const content = await r2Obj.text();
+          await sandbox.writeFile(targetFile, content);
+        } catch {
+          console.warn(`[restore] Background: failed to restore ${key}`);
+        }
+      }),
+    );
+  }
+  console.log('[restore] Background: deferred session restore complete');
 }

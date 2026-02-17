@@ -2,7 +2,7 @@ import type { Sandbox, Process } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
 import { MOLTBOT_PORT, STARTUP_TIMEOUT_MS } from '../config';
 import { buildEnvVars } from './env';
-import { restoreFromR2 } from './sync';
+import { restoreFromR2, restoreDeferredFiles } from './sync';
 
 const PROCESS_LIST_TTL_MS = 3000;
 const PROCESS_LIST_STALE_MS = 15000;
@@ -215,6 +215,7 @@ async function ensureMoltbotGatewayInner(sandbox: Sandbox, env: MoltbotEnv): Pro
     console.log('Starting new OpenClaw gateway...');
 
     // Restore data from R2 before starting the gateway (skip if config already exists)
+    let deferredKeys: string[] | undefined;
     try {
       const [hasNew, hasLegacy] = await Promise.all([
         sandbox.exists('/root/.openclaw/openclaw.json'),
@@ -224,6 +225,7 @@ async function ensureMoltbotGatewayInner(sandbox: Sandbox, env: MoltbotEnv): Pro
         const restoreResult = await restoreFromR2(sandbox, env);
         if (restoreResult.success && restoreResult.lastSync) {
           console.log('[Gateway] Restored from R2 backup at', restoreResult.lastSync);
+          deferredKeys = restoreResult.deferredKeys;
         } else if (restoreResult.error) {
           console.log('[Gateway] R2 restore skipped:', restoreResult.error);
         }
@@ -286,6 +288,13 @@ async function ensureMoltbotGatewayInner(sandbox: Sandbox, env: MoltbotEnv): Pro
 
     // Verify gateway is actually responding
     console.log('[Gateway] Verifying gateway health...');
+
+    // Restore deferred session files in the background (don't block startup)
+    if (deferredKeys && deferredKeys.length > 0) {
+      restoreDeferredFiles(sandbox, env, deferredKeys).catch((err) => {
+        console.warn('[Gateway] Background session restore failed:', err);
+      });
+    }
 
     return process;
   })();
