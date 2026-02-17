@@ -5,26 +5,32 @@ import { initBlooioRuntime } from '../submodules/channels/blooio/src/runtime';
 import { handleBlooioWebhookRequest } from '../submodules/channels/blooio/src/webhook';
 
 function createRuntimeStub() {
+  const recordInboundSession = vi.fn(async () => {});
+  const finalizeInboundContext = vi.fn((ctx: any) => ctx);
   return {
-    channel: {
-      routing: {
-        resolveAgentRoute: vi.fn(() => ({
-          agentId: 'agent-default',
-          sessionKey: 'session-default',
-          mainSessionKey: 'session-default',
-        })),
-      },
-      session: {
-        resolveStorePath: vi.fn(() => '/tmp/sessions'),
-        recordInboundSession: vi.fn(async () => {}),
-      },
-      reply: {
-        resolveEnvelopeFormatOptions: vi.fn(() => ({})),
-        formatInboundEnvelope: vi.fn(() => 'formatted inbound'),
-        finalizeInboundContext: vi.fn((ctx: any) => ctx),
-        dispatchReplyWithBufferedBlockDispatcher: vi.fn(async () => {}),
+    runtime: {
+      channel: {
+        routing: {
+          resolveAgentRoute: vi.fn(() => ({
+            agentId: 'agent-default',
+            sessionKey: 'session-default',
+            mainSessionKey: 'session-default',
+          })),
+        },
+        session: {
+          resolveStorePath: vi.fn(() => '/tmp/sessions'),
+          recordInboundSession,
+        },
+        reply: {
+          resolveEnvelopeFormatOptions: vi.fn(() => ({})),
+          formatInboundEnvelope: vi.fn(() => 'formatted inbound'),
+          finalizeInboundContext,
+          dispatchReplyWithBufferedBlockDispatcher: vi.fn(async () => {}),
+        },
       },
     },
+    recordInboundSession,
+    finalizeInboundContext,
   };
 }
 
@@ -45,10 +51,13 @@ async function postInboundWebhook(opts: {
   status: number;
   body: Record<string, unknown>;
   logger: ReturnType<typeof createLogger>;
+  finalizeInboundContext: ReturnType<typeof vi.fn>;
+  recordInboundSession: ReturnType<typeof vi.fn>;
 }> {
   const logger = createLogger();
+  const runtime = createRuntimeStub();
   initBlooioRuntime({
-    runtime: createRuntimeStub(),
+    runtime: runtime.runtime,
     getConfig: opts.getConfig,
     logger,
   });
@@ -91,12 +100,15 @@ async function postInboundWebhook(opts: {
   const handledPromise = handleBlooioWebhookRequest(req, res);
   req.end(JSON.stringify(payload));
   const handled = await handledPromise;
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   return {
     handled,
     status,
     body: JSON.parse(responseBody || '{}') as Record<string, unknown>,
     logger,
+    finalizeInboundContext: runtime.finalizeInboundContext,
+    recordInboundSession: runtime.recordInboundSession,
   };
 }
 
@@ -140,5 +152,115 @@ describe('blooio webhook', () => {
     expect(result.logger.error).toHaveBeenCalledWith(
       expect.stringContaining('Bloo.io config load error: schema validation failed'),
     );
+  });
+
+  it('passes attachment URLs and MIME types into inbound context', async () => {
+    const imageUrl = 'https://cdn.example.com/uploads/photo.jpg';
+    const result = await postInboundWebhook({
+      getConfig: () => ({
+        channels: {
+          blooio: {
+            enabled: true,
+          },
+        },
+      }),
+      payload: {
+        event: 'message.received',
+        message_id: 'msg-media-1',
+        external_id: '+15712170001',
+        timestamp: 1770836813397,
+        text: 'Who is this?',
+        sender: '+15712170001',
+        attachments: [
+          {
+            id: 'att_1',
+            url: imageUrl,
+            mime_type: 'image/jpeg',
+            file_name: 'photo.jpg',
+          },
+        ],
+      },
+    });
+
+    expect(result.status).toBe(202);
+    expect(result.body).toEqual({ ok: true });
+    expect(result.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        MediaUrls: [imageUrl],
+        MediaUrl: imageUrl,
+        MediaTypes: ['image/jpeg'],
+        MediaType: 'image/jpeg',
+      }),
+    );
+    expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts wrapped webhook payloads and extracts nested attachments', async () => {
+    const pdfUrl = 'https://cdn.example.com/uploads/statement.pdf';
+    const result = await postInboundWebhook({
+      getConfig: () => ({
+        channels: {
+          blooio: {
+            enabled: true,
+          },
+        },
+      }),
+      payload: {
+        body: {
+          event: 'message.received',
+          message_id: 'msg-media-2',
+          external_id: '+15712170002',
+          timestamp: '1770836813397',
+          sender: '+15712170002',
+          text: 'Summarize this PDF',
+          attachments: [
+            {
+              url: pdfUrl,
+              mimeType: 'application/pdf',
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.status).toBe(202);
+    expect(result.body).toEqual({ ok: true });
+    expect(result.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        MediaUrls: [pdfUrl],
+        MediaTypes: ['application/pdf'],
+      }),
+    );
+    expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps explicit inbound events even when status is non-received', async () => {
+    const result = await postInboundWebhook({
+      getConfig: () => ({
+        channels: {
+          blooio: {
+            enabled: true,
+          },
+        },
+      }),
+      payload: {
+        event: 'message.received',
+        status: 'sent',
+        message_id: 'msg-media-3',
+        external_id: '+15712170003',
+        sender: '+15712170003',
+        text: 'Who is this?',
+        attachments: [
+          {
+            url: 'https://cdn.example.com/uploads/image-no-ext',
+            mime_type: 'image/png',
+          },
+        ],
+      },
+    });
+
+    expect(result.status).toBe(202);
+    expect(result.body).toEqual({ ok: true });
+    expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
   });
 });
