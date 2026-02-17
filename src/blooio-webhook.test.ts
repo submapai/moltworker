@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { PassThrough } from 'node:stream';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { initBlooioRuntime } from '../submodules/channels/blooio/src/runtime';
 import { handleBlooioWebhookRequest } from '../submodules/channels/blooio/src/webhook';
 
@@ -41,6 +41,24 @@ function createLogger() {
     error: vi.fn(),
     debug: vi.fn(),
   };
+}
+
+/**
+ * Create a mock fetch that returns fake image data for media download tests.
+ */
+function createMockFetch() {
+  const fakeImageData = Buffer.from('fake-image-data');
+  return vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+    // Return fake image data for any URL (simulates successful download)
+    const contentType = urlStr.endsWith('.pdf') ? 'application/pdf'
+      : urlStr.endsWith('.png') ? 'image/png'
+      : 'image/jpeg';
+    return new Response(fakeImageData, {
+      status: 200,
+      headers: { 'Content-Type': contentType },
+    });
+  });
 }
 
 async function postInboundWebhook(opts: {
@@ -100,7 +118,8 @@ async function postInboundWebhook(opts: {
   const handledPromise = handleBlooioWebhookRequest(req, res);
   req.end(JSON.stringify(payload));
   const handled = await handledPromise;
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  // Wait for the async fire-and-forget handleInboundMessage (includes media download)
+  await new Promise((resolve) => setTimeout(resolve, 100));
 
   return {
     handled,
@@ -113,6 +132,18 @@ async function postInboundWebhook(opts: {
 }
 
 describe('blooio webhook', () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    // Mock fetch globally for media download tests
+    globalThis.fetch = createMockFetch() as any;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
   it('accepts message.received payloads at /blooio/inbound', async () => {
     const result = await postInboundWebhook({
       getConfig: () => ({
@@ -154,8 +185,8 @@ describe('blooio webhook', () => {
     );
   });
 
-  it('passes attachment URLs and MIME types into inbound context', async () => {
-    const imageUrl = 'https://cdn.example.com/uploads/photo.jpg';
+  it('downloads attachments and sets MediaPaths on inbound context', async () => {
+    const imageUrl = 'https://bucket.blooio.com/api-attachments/photo.jpg';
     const result = await postInboundWebhook({
       getConfig: () => ({
         channels: {
@@ -173,10 +204,7 @@ describe('blooio webhook', () => {
         sender: '+15712170001',
         attachments: [
           {
-            id: 'att_1',
             url: imageUrl,
-            mime_type: 'image/jpeg',
-            file_name: 'photo.jpg',
           },
         ],
       },
@@ -186,6 +214,10 @@ describe('blooio webhook', () => {
     expect(result.body).toEqual({ ok: true });
     expect(result.finalizeInboundContext).toHaveBeenCalledWith(
       expect.objectContaining({
+        // MediaPaths should be set (local temp file)
+        MediaPaths: expect.arrayContaining([expect.stringContaining('.jpg')]),
+        MediaPath: expect.stringContaining('.jpg'),
+        // MediaUrls should also be preserved as reference
         MediaUrls: [imageUrl],
         MediaUrl: imageUrl,
         MediaTypes: ['image/jpeg'],
@@ -196,7 +228,7 @@ describe('blooio webhook', () => {
   });
 
   it('accepts wrapped webhook payloads and extracts nested attachments', async () => {
-    const pdfUrl = 'https://cdn.example.com/uploads/statement.pdf';
+    const pdfUrl = 'https://bucket.blooio.com/api-attachments/statement.pdf';
     const result = await postInboundWebhook({
       getConfig: () => ({
         channels: {
@@ -227,6 +259,7 @@ describe('blooio webhook', () => {
     expect(result.body).toEqual({ ok: true });
     expect(result.finalizeInboundContext).toHaveBeenCalledWith(
       expect.objectContaining({
+        MediaPaths: expect.arrayContaining([expect.stringContaining('.pdf')]),
         MediaUrls: [pdfUrl],
         MediaTypes: ['application/pdf'],
       }),
@@ -252,7 +285,7 @@ describe('blooio webhook', () => {
         text: 'Who is this?',
         attachments: [
           {
-            url: 'https://cdn.example.com/uploads/image-no-ext',
+            url: 'https://bucket.blooio.com/api-attachments/image.png',
             mime_type: 'image/png',
           },
         ],
@@ -261,6 +294,44 @@ describe('blooio webhook', () => {
 
     expect(result.status).toBe(202);
     expect(result.body).toEqual({ ok: true });
+    expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to MediaUrls when download fails', async () => {
+    // Override fetch to simulate download failure
+    globalThis.fetch = vi.fn(async () => new Response(null, { status: 500 })) as any;
+
+    const imageUrl = 'https://bucket.blooio.com/api-attachments/photo.jpg';
+    const result = await postInboundWebhook({
+      getConfig: () => ({
+        channels: {
+          blooio: {
+            enabled: true,
+          },
+        },
+      }),
+      payload: {
+        event: 'message.received',
+        message_id: 'msg-media-fallback',
+        external_id: '+15712170004',
+        timestamp: 1770836813397,
+        text: 'Check this out',
+        sender: '+15712170004',
+        attachments: [{ url: imageUrl }],
+      },
+    });
+
+    expect(result.status).toBe(202);
+    expect(result.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Should fall back to remote URLs since download failed
+        MediaUrls: [imageUrl],
+        MediaUrl: imageUrl,
+      }),
+    );
+    // Should NOT have MediaPaths since download failed
+    const ctx = result.finalizeInboundContext.mock.calls[0]?.[0];
+    expect(ctx?.MediaPaths).toBeUndefined();
     expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
   });
 });
