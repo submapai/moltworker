@@ -52,7 +52,7 @@ describe('worker channel webhook routing', () => {
     mocks.syncToR2.mockResolvedValue({ success: true, lastSync: new Date().toISOString() });
   });
 
-  it('proxies /blooio/inbound synchronously without CF Access middleware', async () => {
+  it('proxies /blooio/inbound via catch-all without CF Access middleware', async () => {
     const containerFetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {
         status: 202,
@@ -76,6 +76,7 @@ describe('worker channel webhook routing', () => {
     const ctx = createExecutionContext();
     const res = await worker.fetch(req, env, ctx);
 
+    // Catch-all returns the container's actual response (with debug headers added)
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ ok: true });
     expect(mocks.createAccessMiddleware).not.toHaveBeenCalled();
@@ -108,49 +109,18 @@ describe('worker channel webhook routing', () => {
 
     expect(res.status).toBe(401);
     expect(await res.json()).toMatchObject({ error: 'Invalid signature' });
-    expect(ctx.waitUntil).not.toHaveBeenCalled();
     expect(containerFetch).not.toHaveBeenCalled();
-    expect(mocks.ensureMoltbotGateway).not.toHaveBeenCalled();
+    // Gateway starts before HMAC check in catch-all flow
+    expect(mocks.ensureMoltbotGateway).toHaveBeenCalledOnce();
   });
 
-  it('retries gateway startup on failure in /blooio/inbound', async () => {
-    const containerFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 202,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
-    mocks.getSandbox.mockReturnValue({
-      containerFetch,
-      wsConnect: vi.fn(),
-    });
-
-    // Fail on first call, succeed on second
-    mocks.ensureMoltbotGateway
-      .mockRejectedValueOnce(new Error('container not ready'))
-      .mockResolvedValueOnce({ status: 'running' });
-
-    const req = new Request('https://example.com/blooio/inbound', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: 'inbound_message' }),
-    });
-    const env = createMockEnv();
-    const res = await worker.fetch(req, env, createExecutionContext());
-
-    expect(res.status).toBe(202);
-    expect(mocks.ensureMoltbotGateway).toHaveBeenCalledTimes(2);
-    expect(containerFetch).toHaveBeenCalledOnce();
-  });
-
-  it('returns 503 when gateway fails all retries for /blooio/inbound', { timeout: 15_000 }, async () => {
+  it('returns 503 when gateway fails for /blooio/inbound', async () => {
     const containerFetch = vi.fn();
     mocks.getSandbox.mockReturnValue({
       containerFetch,
       wsConnect: vi.fn(),
     });
 
-    // Fail all attempts
     mocks.ensureMoltbotGateway.mockRejectedValue(new Error('container dead'));
 
     const req = new Request('https://example.com/blooio/inbound', {
@@ -162,7 +132,8 @@ describe('worker channel webhook routing', () => {
     const res = await worker.fetch(req, env, createExecutionContext());
 
     expect(res.status).toBe(503);
-    expect(await res.json()).toMatchObject({ error: 'Gateway unavailable' });
+    expect(await res.json()).toMatchObject({ error: 'Moltbot gateway failed to start' });
+    expect(mocks.ensureMoltbotGateway).toHaveBeenCalledOnce();
     expect(containerFetch).not.toHaveBeenCalled();
   });
 

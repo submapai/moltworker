@@ -24,7 +24,7 @@ import { Hono } from 'hono';
 import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 
 import type { AppEnv, MoltbotEnv } from './types';
-import { MOLTBOT_PORT, WEBHOOK_GATEWAY_MAX_RETRIES, WEBHOOK_GATEWAY_RETRY_DELAY_MS } from './config';
+import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
@@ -193,31 +193,6 @@ async function enrichBlooioPayload(rawText: string, originalUrl: string, origina
     headers,
     body: JSON.stringify(body),
   });
-}
-
-/**
- * Ensure the gateway is running with retry logic.
- * Returns true if gateway is ready, false if all attempts failed.
- */
-async function ensureGatewayWithRetry(
-  sandbox: ReturnType<typeof getSandbox>,
-  env: MoltbotEnv,
-): Promise<boolean> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= WEBHOOK_GATEWAY_MAX_RETRIES; attempt++) {
-    try {
-      await ensureMoltbotGateway(sandbox, env);
-      return true;
-    } catch (err) {
-      lastError = err;
-      console.error(`[BLOOIO] Gateway startup attempt ${attempt + 1}/${WEBHOOK_GATEWAY_MAX_RETRIES + 1} failed:`, err);
-      if (attempt < WEBHOOK_GATEWAY_MAX_RETRIES) {
-        await new Promise((resolve) => setTimeout(resolve, WEBHOOK_GATEWAY_RETRY_DELAY_MS));
-      }
-    }
-  }
-  console.error(`[BLOOIO] All gateway startup attempts failed`);
-  return false;
 }
 
 
@@ -404,67 +379,6 @@ app.use('/debug/*', async (c, next) => {
   return next();
 });
 app.route('/debug', debug);
-
-// =============================================================================
-// BLOO.IO WEBHOOK: Respond 202 immediately, process in background
-// =============================================================================
-
-app.post('/blooio/inbound', async (c) => {
-  const sandbox = c.get('sandbox');
-  const SIGNATURE_MAX_AGE_SEC = 300;
-
-  // Read body as raw text for HMAC verification
-  let rawText: string;
-  try {
-    rawText = await c.req.text();
-  } catch (err: any) {
-    console.error(`[BLOOIO] Failed to read request body: ${err?.message || err}`);
-    return c.json({ error: 'Failed to read body' }, 400);
-  }
-
-  // Verify HMAC signature before accepting
-  const webhookSecret = c.env.BLOOIO_WEBHOOK_SECRET;
-  const signature = c.req.header('x-bloo-signature') || c.req.header('x-blooio-signature');
-  if (webhookSecret && signature) {
-    const { timestampSec, hmacHex } = parseBlooioSignature(signature);
-    if (!timestampSec || !hmacHex) {
-      console.error(`[BLOOIO] Malformed signature header: ${signature}`);
-      return c.json({ error: 'Invalid signature' }, 401);
-    }
-    const expected = await hmacSha256(webhookSecret, `${timestampSec}.${rawText}`);
-    if (expected.toLowerCase() !== hmacHex.toLowerCase()) {
-      console.error(`[BLOOIO] HMAC mismatch — rejecting webhook`);
-      return c.json({ error: 'Invalid signature' }, 401);
-    }
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (Math.abs(nowSec - timestampSec) > SIGNATURE_MAX_AGE_SEC) {
-      console.error(`[BLOOIO] Stale signature (age: ${Math.abs(nowSec - timestampSec)}s, max: ${SIGNATURE_MAX_AGE_SEC}s)`);
-      return c.json({ error: 'Stale signature' }, 401);
-    }
-    console.log(`[BLOOIO] HMAC verified`);
-  } else if (webhookSecret && !signature) {
-    console.log(`[BLOOIO] No signature header present — skipping HMAC verification`);
-  }
-
-  // Ensure gateway is running (fast when warm, retries on failure)
-  const gatewayReady = await ensureGatewayWithRetry(sandbox, c.env);
-  if (!gatewayReady) {
-    return c.json({ error: 'Gateway unavailable' }, 503);
-  }
-
-  // Enrich attachments and proxy to container synchronously.
-  // containerFetch must run in the main request lifecycle — sandbox
-  // bindings are not reliable inside waitUntil after response is sent.
-  const enrichedRequest = await enrichBlooioPayload(
-    rawText,
-    c.req.url,
-    new Headers(c.req.raw.headers),
-  );
-  const containerResponse = await sandbox.containerFetch(enrichedRequest, MOLTBOT_PORT);
-  console.log(`[BLOOIO] Container responded: ${containerResponse.status}`);
-
-  return c.json({ ok: true }, 202);
-});
 
 // =============================================================================
 // CATCH-ALL: Proxy to Moltbot gateway
@@ -683,6 +597,39 @@ app.all('*', async (c) => {
   if (url.searchParams.has('_ready')) {
     url.searchParams.delete('_ready');
     request = new Request(url.toString(), request);
+  }
+
+  // Enrich Bloo.io webhooks: verify HMAC and download attachments before proxying
+  if (url.pathname === '/blooio/inbound' && request.method === 'POST') {
+    const rawText = await request.text();
+
+    // Verify HMAC signature if webhook secret is configured
+    const webhookSecret = c.env.BLOOIO_WEBHOOK_SECRET;
+    const signature =
+      request.headers.get('x-bloo-signature') || request.headers.get('x-blooio-signature');
+    if (webhookSecret && signature) {
+      const SIGNATURE_MAX_AGE_SEC = 300;
+      const { timestampSec, hmacHex } = parseBlooioSignature(signature);
+      if (!timestampSec || !hmacHex) {
+        console.error(`[BLOOIO] Malformed signature header: ${signature}`);
+        return c.json({ error: 'Invalid signature' }, 401);
+      }
+      const expected = await hmacSha256(webhookSecret, `${timestampSec}.${rawText}`);
+      if (expected.toLowerCase() !== hmacHex.toLowerCase()) {
+        console.error(`[BLOOIO] HMAC mismatch — rejecting webhook`);
+        return c.json({ error: 'Invalid signature' }, 401);
+      }
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (Math.abs(nowSec - timestampSec) > SIGNATURE_MAX_AGE_SEC) {
+        console.error(
+          `[BLOOIO] Stale signature (age: ${Math.abs(nowSec - timestampSec)}s, max: ${SIGNATURE_MAX_AGE_SEC}s)`,
+        );
+        return c.json({ error: 'Stale signature' }, 401);
+      }
+      console.log(`[BLOOIO] HMAC verified`);
+    }
+
+    request = await enrichBlooioPayload(rawText, request.url, new Headers(request.headers));
   }
 
   console.log('[HTTP] Proxying:', url.pathname + url.search);
