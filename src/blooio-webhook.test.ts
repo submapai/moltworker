@@ -520,6 +520,39 @@ describe('blooio webhook', () => {
     );
   });
 
+  it('accepts requests without signature when BLOOIO_WEBHOOK_SECRET is set (Worker-enriched flow)', async () => {
+    // When the Worker enriches attachments, it strips signature headers.
+    // The plugin should accept the request since the container is only reachable through the Worker.
+    const originalSecret = process.env.BLOOIO_WEBHOOK_SECRET;
+    process.env.BLOOIO_WEBHOOK_SECRET = 'test-webhook-secret-123';
+    try {
+      const result = await postInboundWebhook({
+        getConfig: () => ({
+          channels: { blooio: { enabled: true } },
+        }),
+        payload: {
+          event: 'message.received',
+          message_id: 'msg-no-sig',
+          external_id: '+15712170020',
+          timestamp: 1770836813397,
+          text: 'Hello from enriched worker',
+          sender: '+15712170020',
+        },
+      });
+
+      // Should accept (202), NOT reject with 401
+      expect(result.status).toBe(202);
+      expect(result.body).toEqual({ ok: true });
+      expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalSecret !== undefined) {
+        process.env.BLOOIO_WEBHOOK_SECRET = originalSecret;
+      } else {
+        delete process.env.BLOOIO_WEBHOOK_SECRET;
+      }
+    }
+  });
+
   it('downloads each attachment from webhook attachments array', async () => {
     const urls = [
       'https://bucket.blooio.com/api-attachments/photo-a.jpg',
