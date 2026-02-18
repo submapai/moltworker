@@ -52,7 +52,7 @@ describe('worker channel webhook routing', () => {
     mocks.syncToR2.mockResolvedValue({ success: true, lastSync: new Date().toISOString() });
   });
 
-  it('responds 202 for /blooio/inbound, awaits gateway, proxies in waitUntil', async () => {
+  it('proxies /blooio/inbound synchronously without CF Access middleware', async () => {
     const containerFetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {
         status: 202,
@@ -76,20 +76,11 @@ describe('worker channel webhook routing', () => {
     const ctx = createExecutionContext();
     const res = await worker.fetch(req, env, ctx);
 
-    // Response is 202
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ ok: true });
     expect(mocks.createAccessMiddleware).not.toHaveBeenCalled();
     expect(authMiddleware).not.toHaveBeenCalled();
-
-    // Gateway was awaited synchronously before responding
     expect(mocks.ensureMoltbotGateway).toHaveBeenCalledOnce();
-
-    // containerFetch runs in waitUntil background
-    expect(ctx.waitUntil).toHaveBeenCalledOnce();
-    const bgPromise = (ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    await bgPromise;
-
     expect(containerFetch).toHaveBeenCalledOnce();
     const proxiedReq = containerFetch.mock.calls[0][0] as Request;
     expect(proxiedReq.url).toBe('https://example.com/blooio/inbound');
@@ -145,16 +136,10 @@ describe('worker channel webhook routing', () => {
       body: JSON.stringify({ event: 'inbound_message' }),
     });
     const env = createMockEnv();
-    const ctx = createExecutionContext();
-    const res = await worker.fetch(req, env, ctx);
+    const res = await worker.fetch(req, env, createExecutionContext());
 
-    // Gateway retry succeeded, so we get 202
     expect(res.status).toBe(202);
     expect(mocks.ensureMoltbotGateway).toHaveBeenCalledTimes(2);
-
-    // containerFetch runs in waitUntil
-    const bgPromise = (ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    await bgPromise;
     expect(containerFetch).toHaveBeenCalledOnce();
   });
 
@@ -174,12 +159,10 @@ describe('worker channel webhook routing', () => {
       body: JSON.stringify({ event: 'inbound_message' }),
     });
     const env = createMockEnv();
-    const ctx = createExecutionContext();
-    const res = await worker.fetch(req, env, ctx);
+    const res = await worker.fetch(req, env, createExecutionContext());
 
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ error: 'Gateway unavailable' });
-    expect(ctx.waitUntil).not.toHaveBeenCalled();
     expect(containerFetch).not.toHaveBeenCalled();
   });
 

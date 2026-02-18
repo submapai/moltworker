@@ -220,24 +220,6 @@ async function ensureGatewayWithRetry(
   return false;
 }
 
-/**
- * Enrich attachments and proxy to container in waitUntil.
- * Never throws — errors are logged and swallowed (fire-and-forget).
- */
-async function proxyBlooioToContainer(
-  sandbox: ReturnType<typeof getSandbox>,
-  rawText: string,
-  originalUrl: string,
-  originalHeaders: Headers,
-): Promise<void> {
-  try {
-    const enrichedRequest = await enrichBlooioPayload(rawText, originalUrl, originalHeaders);
-    const response = await sandbox.containerFetch(enrichedRequest, MOLTBOT_PORT);
-    console.log(`[BLOOIO] Container responded: ${response.status}`);
-  } catch (err) {
-    console.error(`[BLOOIO] Background proxy error:`, err);
-  }
-}
 
 /**
  * Validate required environment variables.
@@ -464,23 +446,22 @@ app.post('/blooio/inbound', async (c) => {
     console.log(`[BLOOIO] No signature header present — skipping HMAC verification`);
   }
 
-  // Ensure gateway is running BEFORE responding — this is fast when warm,
-  // and necessary because containerFetch doesn't work in waitUntil after
-  // the response is sent (sandbox binding lifecycle).
+  // Ensure gateway is running (fast when warm, retries on failure)
   const gatewayReady = await ensureGatewayWithRetry(sandbox, c.env);
   if (!gatewayReady) {
     return c.json({ error: 'Gateway unavailable' }, 503);
   }
 
-  // Respond 202 immediately — enrich + proxy in background
-  c.executionCtx.waitUntil(
-    proxyBlooioToContainer(
-      sandbox,
-      rawText,
-      c.req.url,
-      new Headers(c.req.raw.headers),
-    ),
+  // Enrich attachments and proxy to container synchronously.
+  // containerFetch must run in the main request lifecycle — sandbox
+  // bindings are not reliable inside waitUntil after response is sent.
+  const enrichedRequest = await enrichBlooioPayload(
+    rawText,
+    c.req.url,
+    new Headers(c.req.raw.headers),
   );
+  const containerResponse = await sandbox.containerFetch(enrichedRequest, MOLTBOT_PORT);
+  console.log(`[BLOOIO] Container responded: ${containerResponse.status}`);
 
   return c.json({ ok: true }, 202);
 });
