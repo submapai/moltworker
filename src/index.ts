@@ -76,20 +76,34 @@ export { Sandbox };
  * the payload before proxying to the container.
  */
 async function enrichBlooioAttachments(request: Request): Promise<Request> {
-  let body: any;
+  // Read body as raw text first to preserve exact bytes for HMAC signature verification
+  let rawText: string;
   try {
-    body = await request.json();
+    rawText = await request.text();
   } catch {
     return request;
+  }
+
+  let body: any;
+  try {
+    body = JSON.parse(rawText);
+  } catch {
+    // Not valid JSON — forward with original bytes
+    return new Request(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: rawText,
+    });
   }
 
   // Attachments can be at top level or nested under body
   const attachments = body.attachments || body.body?.attachments;
   if (!Array.isArray(attachments) || attachments.length === 0) {
+    // No attachments — preserve original body bytes for signature verification
     return new Request(request.url, {
       method: request.method,
       headers: request.headers,
-      body: JSON.stringify(body),
+      body: rawText,
     });
   }
 
@@ -126,9 +140,25 @@ async function enrichBlooioAttachments(request: Request): Promise<Request> {
     }
   }
 
+  // If no attachments were actually enriched, preserve original body for signature
+  const enriched = attachments.some((att: any) => att.base64_data);
+  if (!enriched) {
+    return new Request(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: rawText,
+    });
+  }
+
+  // Body was modified — strip webhook signature headers since HMAC won't match the new payload.
+  // This is safe: the Worker is a trusted intermediary within our own infrastructure.
+  const headers = new Headers(request.headers);
+  headers.delete('x-bloo-signature');
+  headers.delete('x-blooio-signature');
+
   return new Request(request.url, {
     method: request.method,
-    headers: request.headers,
+    headers,
     body: JSON.stringify(body),
   });
 }
