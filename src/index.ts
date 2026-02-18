@@ -24,7 +24,7 @@ import { Hono } from 'hono';
 import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 
 import type { AppEnv, MoltbotEnv } from './types';
-import { MOLTBOT_PORT } from './config';
+import { MOLTBOT_PORT, WEBHOOK_GATEWAY_MAX_RETRIES, WEBHOOK_GATEWAY_RETRY_DELAY_MS } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
@@ -254,6 +254,141 @@ function parseBlooioSignature(header: string): { timestampSec: number | null; hm
 }
 
 /**
+ * Enrich a Bloo.io webhook payload by downloading attachments and base64-encoding them.
+ * Assumes HMAC has already been verified by the caller.
+ * Returns a new Request ready for containerFetch (with signature headers stripped).
+ */
+async function enrichBlooioPayload(rawText: string, originalUrl: string, originalHeaders: Headers): Promise<Request> {
+  const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+  // Strip signature headers — Worker already verified HMAC
+  const headers = new Headers(originalHeaders);
+  headers.delete('x-bloo-signature');
+  headers.delete('x-blooio-signature');
+
+  const forwardOriginal = () =>
+    new Request(originalUrl, { method: 'POST', headers, body: rawText });
+
+  let body: any;
+  try {
+    body = JSON.parse(rawText);
+  } catch (err: any) {
+    console.error(`[BLOOIO] Failed to parse webhook JSON: ${err?.message || err}`);
+    return forwardOriginal();
+  }
+
+  const attachments = body.attachments || body.body?.attachments;
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    console.log(`[BLOOIO] No attachments array in payload (keys: ${Object.keys(body).join(', ')})`);
+    return forwardOriginal();
+  }
+
+  console.log(`[BLOOIO] Enriching ${attachments.length} attachment(s)`);
+
+  for (let idx = 0; idx < attachments.length; idx++) {
+    const att = attachments[idx];
+    if (typeof att !== 'object' || att === null) {
+      console.warn(`[BLOOIO] Attachment[${idx}] is not an object: ${typeof att} ${JSON.stringify(att)}`);
+      continue;
+    }
+    const url = att.url || att.download_url || att.downloadUrl || att.signed_url || att.href;
+    if (!url || typeof url !== 'string') {
+      console.warn(`[BLOOIO] Attachment[${idx}] has no URL field (keys: ${Object.keys(att).join(', ')})`);
+      continue;
+    }
+    try {
+      console.log(`[BLOOIO] Attachment[${idx}] fetching: ${url}`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      const resp = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) {
+        const respBody = await resp.text().catch(() => '');
+        console.error(`[BLOOIO] Attachment[${idx}] fetch failed: HTTP ${resp.status} ${resp.statusText} for ${url} — body: ${respBody.slice(0, 500)}`);
+        continue;
+      }
+      const contentType = resp.headers.get('content-type') || 'application/octet-stream';
+      const buf = await resp.arrayBuffer();
+      console.log(`[BLOOIO] Attachment[${idx}] response: ${buf.byteLength} bytes, content-type: ${contentType}`);
+      if (buf.byteLength > ATTACHMENT_MAX_BYTES) {
+        console.warn(`[BLOOIO] Attachment[${idx}] too large (${buf.byteLength} bytes), skipping: ${url}`);
+        continue;
+      }
+      if (buf.byteLength === 0) {
+        console.warn(`[BLOOIO] Attachment[${idx}] empty response body (0 bytes), skipping: ${url}`);
+        continue;
+      }
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      att.base64_data = btoa(binary);
+      att.content_type = contentType;
+      console.log(`[BLOOIO] Attachment[${idx}] enriched: ${url} (${buf.byteLength} bytes, ${contentType}, base64 length: ${att.base64_data.length})`);
+    } catch (err: any) {
+      const isAbort = err?.name === 'AbortError';
+      console.error(`[BLOOIO] Attachment[${idx}] download error for ${url}: ${isAbort ? 'TIMEOUT (30s)' : err?.message || err}`);
+    }
+  }
+
+  const enriched = attachments.some((att: any) => att.base64_data);
+  if (!enriched) {
+    console.error(`[BLOOIO] No attachments were enriched out of ${attachments.length} — forwarding original payload`);
+    return forwardOriginal();
+  }
+  console.log(`[BLOOIO] ${attachments.filter((a: any) => a.base64_data).length}/${attachments.length} attachment(s) enriched`);
+
+  return new Request(originalUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Process a Bloo.io webhook asynchronously in waitUntil.
+ * Retries gateway startup, enriches attachments, and proxies to container.
+ * Never throws — errors are logged and swallowed (fire-and-forget).
+ */
+async function processBlooioWebhookAsync(
+  sandbox: ReturnType<typeof getSandbox>,
+  env: MoltbotEnv,
+  rawText: string,
+  originalUrl: string,
+  originalHeaders: Headers,
+): Promise<void> {
+  try {
+    // Ensure gateway is running with retry logic
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= WEBHOOK_GATEWAY_MAX_RETRIES; attempt++) {
+      try {
+        await ensureMoltbotGateway(sandbox, env);
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        console.error(`[BLOOIO] Gateway startup attempt ${attempt + 1}/${WEBHOOK_GATEWAY_MAX_RETRIES + 1} failed:`, err);
+        if (attempt < WEBHOOK_GATEWAY_MAX_RETRIES) {
+          await new Promise((resolve) => setTimeout(resolve, WEBHOOK_GATEWAY_RETRY_DELAY_MS));
+        }
+      }
+    }
+    if (lastError) {
+      console.error(`[BLOOIO] All gateway startup attempts failed — dropping webhook`);
+      return;
+    }
+
+    // Enrich attachments and proxy to container
+    const enrichedRequest = await enrichBlooioPayload(rawText, originalUrl, originalHeaders);
+    const response = await sandbox.containerFetch(enrichedRequest, MOLTBOT_PORT);
+    console.log(`[BLOOIO] Container responded: ${response.status}`);
+  } catch (err) {
+    console.error(`[BLOOIO] Background processing error:`, err);
+  }
+}
+
+/**
  * Validate required environment variables.
  * Returns an array of missing variable descriptions, or empty array if all are set.
  */
@@ -436,6 +571,61 @@ app.use('/debug/*', async (c, next) => {
   return next();
 });
 app.route('/debug', debug);
+
+// =============================================================================
+// BLOO.IO WEBHOOK: Respond 202 immediately, process in background
+// =============================================================================
+
+app.post('/blooio/inbound', async (c) => {
+  const sandbox = c.get('sandbox');
+  const SIGNATURE_MAX_AGE_SEC = 300;
+
+  // Read body as raw text for HMAC verification
+  let rawText: string;
+  try {
+    rawText = await c.req.text();
+  } catch (err: any) {
+    console.error(`[BLOOIO] Failed to read request body: ${err?.message || err}`);
+    return c.json({ error: 'Failed to read body' }, 400);
+  }
+
+  // Verify HMAC signature before accepting
+  const webhookSecret = c.env.BLOOIO_WEBHOOK_SECRET;
+  const signature = c.req.header('x-bloo-signature') || c.req.header('x-blooio-signature');
+  if (webhookSecret && signature) {
+    const { timestampSec, hmacHex } = parseBlooioSignature(signature);
+    if (!timestampSec || !hmacHex) {
+      console.error(`[BLOOIO] Malformed signature header: ${signature}`);
+      return c.json({ error: 'Invalid signature' }, 401);
+    }
+    const expected = await hmacSha256(webhookSecret, `${timestampSec}.${rawText}`);
+    if (expected.toLowerCase() !== hmacHex.toLowerCase()) {
+      console.error(`[BLOOIO] HMAC mismatch — rejecting webhook`);
+      return c.json({ error: 'Invalid signature' }, 401);
+    }
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSec - timestampSec) > SIGNATURE_MAX_AGE_SEC) {
+      console.error(`[BLOOIO] Stale signature (age: ${Math.abs(nowSec - timestampSec)}s, max: ${SIGNATURE_MAX_AGE_SEC}s)`);
+      return c.json({ error: 'Stale signature' }, 401);
+    }
+    console.log(`[BLOOIO] HMAC verified`);
+  } else if (webhookSecret && !signature) {
+    console.log(`[BLOOIO] No signature header present — skipping HMAC verification`);
+  }
+
+  // Respond 202 immediately — process in background
+  c.executionCtx.waitUntil(
+    processBlooioWebhookAsync(
+      sandbox,
+      c.env,
+      rawText,
+      c.req.url,
+      new Headers(c.req.raw.headers),
+    ),
+  );
+
+  return c.json({ ok: true }, 202);
+});
 
 // =============================================================================
 // CATCH-ALL: Proxy to Moltbot gateway
@@ -654,17 +844,6 @@ app.all('*', async (c) => {
   if (url.searchParams.has('_ready')) {
     url.searchParams.delete('_ready');
     request = new Request(url.toString(), request);
-  }
-
-  // Enrich Bloo.io webhook attachments (download in Worker since container can't fetch externally)
-  if (url.pathname === '/blooio/inbound' && request.method === 'POST') {
-    try {
-      const result = await enrichBlooioAttachments(request, c.env.BLOOIO_WEBHOOK_SECRET);
-      if (result instanceof Response) return result; // HMAC rejected — short-circuit
-      request = result;
-    } catch (err: any) {
-      console.error('[BLOOIO] Attachment enrichment error:', err?.message || err);
-    }
   }
 
   console.log('[HTTP] Proxying:', url.pathname + url.search);

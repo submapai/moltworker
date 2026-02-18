@@ -52,7 +52,7 @@ describe('worker channel webhook routing', () => {
     mocks.syncToR2.mockResolvedValue({ success: true, lastSync: new Date().toISOString() });
   });
 
-  it('proxies /blooio/inbound without applying CF Access middleware', async () => {
+  it('responds 202 immediately for /blooio/inbound and processes in waitUntil', async () => {
     const containerFetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {
         status: 202,
@@ -73,14 +73,92 @@ describe('worker channel webhook routing', () => {
       body: JSON.stringify({ event: 'inbound_message' }),
     });
     const env = createMockEnv();
-    const res = await worker.fetch(req, env, createExecutionContext());
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(req, env, ctx);
 
+    // Response is 202 immediately
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ ok: true });
     expect(mocks.createAccessMiddleware).not.toHaveBeenCalled();
     expect(authMiddleware).not.toHaveBeenCalled();
-    expect(containerFetch).toHaveBeenCalledWith(req, 18789);
+
+    // waitUntil was called with the background processing promise
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
+
+    // Await the background promise to verify processing completes
+    const bgPromise = (ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    await bgPromise;
+
     expect(mocks.ensureMoltbotGateway).toHaveBeenCalledOnce();
+    // containerFetch is called with a new Request (body was consumed), same URL
+    expect(containerFetch).toHaveBeenCalledOnce();
+    const proxiedReq = containerFetch.mock.calls[0][0] as Request;
+    expect(proxiedReq.url).toBe('https://example.com/blooio/inbound');
+    expect(containerFetch.mock.calls[0][1]).toBe(18789);
+  });
+
+  it('rejects /blooio/inbound with invalid HMAC signature', async () => {
+    const containerFetch = vi.fn();
+    mocks.getSandbox.mockReturnValue({
+      containerFetch,
+      wsConnect: vi.fn(),
+    });
+
+    const req = new Request('https://example.com/blooio/inbound', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-bloo-signature': 't=9999999999,v1=deadbeef',
+      },
+      body: JSON.stringify({ event: 'inbound_message' }),
+    });
+    const env = createMockEnv({ BLOOIO_WEBHOOK_SECRET: 'test-secret' });
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(req, env, ctx);
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ error: 'Invalid signature' });
+    // No waitUntil registered on HMAC rejection
+    expect(ctx.waitUntil).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(mocks.ensureMoltbotGateway).not.toHaveBeenCalled();
+  });
+
+  it('retries gateway startup on failure in /blooio/inbound background processing', async () => {
+    const containerFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    mocks.getSandbox.mockReturnValue({
+      containerFetch,
+      wsConnect: vi.fn(),
+    });
+
+    // Fail on first call, succeed on second
+    mocks.ensureMoltbotGateway
+      .mockRejectedValueOnce(new Error('container not ready'))
+      .mockResolvedValueOnce({ status: 'running' });
+
+    const req = new Request('https://example.com/blooio/inbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'inbound_message' }),
+    });
+    const env = createMockEnv();
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(req, env, ctx);
+
+    expect(res.status).toBe(202);
+
+    // Await background processing
+    const bgPromise = (ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    await bgPromise;
+
+    // ensureMoltbotGateway called twice (first failed, second succeeded)
+    expect(mocks.ensureMoltbotGateway).toHaveBeenCalledTimes(2);
+    expect(containerFetch).toHaveBeenCalledOnce();
   });
 
   it('proxies /email/inbound without applying CF Access middleware', async () => {
