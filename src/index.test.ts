@@ -76,42 +76,15 @@ describe('worker channel webhook routing', () => {
     const ctx = createExecutionContext();
     const res = await worker.fetch(req, env, ctx);
 
-    // Catch-all returns the container's actual response (with debug headers added)
+    // Catch-all passes raw request to container and returns container's response
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ ok: true });
     expect(mocks.createAccessMiddleware).not.toHaveBeenCalled();
     expect(authMiddleware).not.toHaveBeenCalled();
     expect(mocks.ensureMoltbotGateway).toHaveBeenCalledOnce();
     expect(containerFetch).toHaveBeenCalledOnce();
-    const proxiedReq = containerFetch.mock.calls[0][0] as Request;
-    expect(proxiedReq.url).toBe('https://example.com/blooio/inbound');
+    expect(containerFetch.mock.calls[0][0]).toBe(req);
     expect(containerFetch.mock.calls[0][1]).toBe(18789);
-  });
-
-  it('rejects /blooio/inbound with invalid HMAC signature', async () => {
-    const containerFetch = vi.fn();
-    mocks.getSandbox.mockReturnValue({
-      containerFetch,
-      wsConnect: vi.fn(),
-    });
-
-    const req = new Request('https://example.com/blooio/inbound', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-bloo-signature': 't=9999999999,v1=deadbeef',
-      },
-      body: JSON.stringify({ event: 'inbound_message' }),
-    });
-    const env = createMockEnv({ BLOOIO_WEBHOOK_SECRET: 'test-secret' });
-    const ctx = createExecutionContext();
-    const res = await worker.fetch(req, env, ctx);
-
-    expect(res.status).toBe(401);
-    expect(await res.json()).toMatchObject({ error: 'Invalid signature' });
-    expect(containerFetch).not.toHaveBeenCalled();
-    // Gateway starts before HMAC check in catch-all flow
-    expect(mocks.ensureMoltbotGateway).toHaveBeenCalledOnce();
   });
 
   it('returns 503 when gateway fails for /blooio/inbound', async () => {

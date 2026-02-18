@@ -599,39 +599,6 @@ app.all('*', async (c) => {
     request = new Request(url.toString(), request);
   }
 
-  // Enrich Bloo.io webhooks: verify HMAC and download attachments before proxying
-  if (url.pathname === '/blooio/inbound' && request.method === 'POST') {
-    const rawText = await request.text();
-
-    // Verify HMAC signature if webhook secret is configured
-    const webhookSecret = c.env.BLOOIO_WEBHOOK_SECRET;
-    const signature =
-      request.headers.get('x-bloo-signature') || request.headers.get('x-blooio-signature');
-    if (webhookSecret && signature) {
-      const SIGNATURE_MAX_AGE_SEC = 300;
-      const { timestampSec, hmacHex } = parseBlooioSignature(signature);
-      if (!timestampSec || !hmacHex) {
-        console.error(`[BLOOIO] Malformed signature header: ${signature}`);
-        return c.json({ error: 'Invalid signature' }, 401);
-      }
-      const expected = await hmacSha256(webhookSecret, `${timestampSec}.${rawText}`);
-      if (expected.toLowerCase() !== hmacHex.toLowerCase()) {
-        console.error(`[BLOOIO] HMAC mismatch — rejecting webhook`);
-        return c.json({ error: 'Invalid signature' }, 401);
-      }
-      const nowSec = Math.floor(Date.now() / 1000);
-      if (Math.abs(nowSec - timestampSec) > SIGNATURE_MAX_AGE_SEC) {
-        console.error(
-          `[BLOOIO] Stale signature (age: ${Math.abs(nowSec - timestampSec)}s, max: ${SIGNATURE_MAX_AGE_SEC}s)`,
-        );
-        return c.json({ error: 'Stale signature' }, 401);
-      }
-      console.log(`[BLOOIO] HMAC verified`);
-    }
-
-    request = await enrichBlooioPayload(rawText, request.url, new Headers(request.headers));
-  }
-
   console.log('[HTTP] Proxying:', url.pathname + url.search);
   const httpResponse = await sandbox.containerFetch(request, MOLTBOT_PORT);
   console.log('[HTTP] Response status:', httpResponse.status);
