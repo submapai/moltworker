@@ -407,4 +407,56 @@ describe('blooio webhook', () => {
     );
     expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
   });
+
+  it('downloads each attachment from webhook attachments array', async () => {
+    const urls = [
+      'https://bucket.blooio.com/api-attachments/photo-a.jpg',
+      'https://bucket.blooio.com/api-attachments/photo-b.jpg',
+    ];
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+      if (urls.includes(urlStr)) {
+        return new Response(Buffer.from(`data-${urlStr}`), {
+          status: 200,
+          headers: { 'Content-Type': 'image/jpeg' },
+        });
+      }
+      return new Response(null, { status: 200 });
+    });
+    globalThis.fetch = fetchMock as any;
+
+    const result = await postInboundWebhook({
+      getConfig: () => ({
+        channels: {
+          blooio: {
+            enabled: true,
+          },
+        },
+      }),
+      payload: {
+        event: 'message.received',
+        message_id: 'msg-media-multi',
+        external_id: '+15712170006',
+        timestamp: 1770836813397,
+        text: 'What is in these photos?',
+        sender: '+15712170006',
+        attachments: urls.map((url) => ({ url })),
+      },
+    });
+
+    const downloadCalls = fetchMock.mock.calls.filter((call) => {
+      const target = call[0];
+      const urlStr = typeof target === 'string' ? target : target instanceof URL ? target.toString() : target.url;
+      return urls.includes(urlStr);
+    });
+    expect(downloadCalls).toHaveLength(2);
+    expect(result.saveMediaBuffer).toHaveBeenCalledTimes(2);
+
+    const ctx = result.finalizeInboundContext.mock.calls[0]?.[0];
+    expect(Array.isArray(ctx?.MediaPaths)).toBe(true);
+    expect(ctx?.MediaPaths).toHaveLength(2);
+    expect(ctx?.MediaPaths[0]).toContain('.jpg');
+    expect(ctx?.MediaPaths[1]).toContain('.jpg');
+    expect(ctx?.MediaUrls).toEqual(ctx?.MediaPaths);
+  });
 });
