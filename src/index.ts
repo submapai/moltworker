@@ -26,7 +26,7 @@ import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 import type { AppEnv, MoltbotEnv } from './types';
 import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
-import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
+import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, wakeContainer } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import loadingPageHtml from './assets/loading.html?raw';
@@ -405,12 +405,10 @@ app.all('*', async (c) => {
   if (!isGatewayReady && !isWebSocketRequest && acceptsHtml && !isReadyRedirect) {
     console.log('[PROXY] Gateway not ready, serving loading page');
 
-    // Start the gateway in the background (don't await)
-    c.executionCtx.waitUntil(
-      ensureMoltbotGateway(sandbox, c.env).catch((err: Error) => {
-        console.error('[PROXY] Background gateway start failed:', err);
-      }),
-    );
+    // Wake the container VM so it's ready when the loading page redirects with ?_ready=1.
+    // Uses containerFetch (has auto-start) instead of ensureMoltbotGateway (90s timeout)
+    // because waitUntil() is limited to 30s after the response is sent.
+    c.executionCtx.waitUntil(wakeContainer(sandbox));
 
     // Return the loading page immediately
     return c.html(loadingPageHtml);

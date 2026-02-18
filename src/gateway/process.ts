@@ -15,7 +15,11 @@ let lastListError: string | null = null;
 let lastListErrorAt = 0;
 
 let startInFlight: Promise<Process> | null = null;
+let startInFlightAt = 0;
 let lastStartAttemptAt = 0;
+
+/** Max time startInFlight can stay pending before we consider it stale (e.g., killed by waitUntil) */
+const START_INFLIGHT_STALE_MS = 120_000;
 
 // Process IDs that returned 404 on kill — skip re-killing on subsequent calls
 const unkillableIds = new Set<string>();
@@ -77,6 +81,21 @@ export function resetProcessCache(): void {
   cachedAt = 0;
   listInFlight = null;
   unkillableIds.clear();
+}
+
+/**
+ * Lightweight container wake-up — safe for waitUntil() (completes in seconds, not minutes).
+ *
+ * Uses containerFetch which has built-in auto-start logic to provision the container VM.
+ * Does NOT start the gateway process or wait for ports — that happens synchronously
+ * when the next real request calls ensureMoltbotGateway().
+ */
+export async function wakeContainer(sandbox: Sandbox): Promise<void> {
+  try {
+    await sandbox.containerFetch(new Request('http://localhost/'), MOLTBOT_PORT);
+  } catch {
+    // Expected: gateway isn't listening yet, but the container VM should be starting.
+  }
 }
 
 /**
@@ -190,7 +209,13 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
 
 async function ensureMoltbotGatewayInner(sandbox: Sandbox, env: MoltbotEnv): Promise<Process> {
   if (startInFlight) {
-    return startInFlight;
+    // Guard against stale promises left by cancelled waitUntil() tasks
+    if (Date.now() - startInFlightAt > START_INFLIGHT_STALE_MS) {
+      console.log('[Gateway] Clearing stale startInFlight (likely killed by waitUntil timeout)');
+      startInFlight = null;
+    } else {
+      return startInFlight;
+    }
   }
 
   // Check if gateway is already running or starting
@@ -230,6 +255,7 @@ async function ensureMoltbotGatewayInner(sandbox: Sandbox, env: MoltbotEnv): Pro
   lastStartAttemptAt = now;
 
   // Start a new OpenClaw gateway
+  startInFlightAt = Date.now();
   startInFlight = (async () => {
     console.log('Starting new OpenClaw gateway...');
 

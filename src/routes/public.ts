@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { MOLTBOT_PORT } from '../config';
-import { ensureMoltbotGateway, findExistingMoltbotProcess, getProcessListHealth } from '../gateway';
+import { findExistingMoltbotProcess, getProcessListHealth, wakeContainer } from '../gateway';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
@@ -42,13 +42,11 @@ publicRoutes.get('/api/status', async (c) => {
         return c.json({ ok: false, status: 'busy', error: lastError });
       }
 
-      // Self-healing: trigger gateway startup so polling recovers from deadlock
-      console.log('[STATUS] No gateway process found, triggering startup');
-      c.executionCtx.waitUntil(
-        ensureMoltbotGateway(c.get('sandbox'), c.env).catch((err: Error) => {
-          console.error('[STATUS] Background gateway start failed:', err);
-        }),
-      );
+      // Wake the container VM so the next synchronous request can start the gateway.
+      // Uses containerFetch (has auto-start) instead of ensureMoltbotGateway (90s timeout)
+      // because waitUntil() is limited to 30s after the response is sent.
+      console.log('[STATUS] No gateway process found, waking container');
+      c.executionCtx.waitUntil(wakeContainer(c.get('sandbox')));
       return c.json({ ok: false, status: 'starting' });
     }
 
