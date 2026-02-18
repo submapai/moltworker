@@ -25,6 +25,14 @@ function isDurableObjectReset(err: unknown): boolean {
   return err.message.includes('Durable Object reset because its code was updated');
 }
 
+function isContainerNotRunning(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return (
+    err.message.includes('container is not running') ||
+    err.message.includes('no container instance')
+  );
+}
+
 async function listProcessesCached(sandbox: Sandbox): Promise<Process[]> {
   const now = Date.now();
   if (cachedProcesses && now - cachedAt < PROCESS_LIST_TTL_MS) {
@@ -155,8 +163,19 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
   try {
     return await ensureMoltbotGatewayInner(sandbox, env);
   } catch (err) {
-    if (isDurableObjectReset(err)) {
-      console.log('[Gateway] Durable Object was reset after code update, retrying...');
+    if (isDurableObjectReset(err) || isContainerNotRunning(err)) {
+      const reason = isDurableObjectReset(err) ? 'DO reset' : 'container not running';
+      console.log(`[Gateway] ${reason}, waking container and retrying...`);
+
+      // containerFetch has built-in auto-start logic that provisions the container VM.
+      // Call it to trigger the container to start — it will fail (nothing listening on
+      // the port yet) but the side effect of starting the container is what we need.
+      try {
+        await sandbox.containerFetch(new Request('http://localhost/'), MOLTBOT_PORT);
+      } catch {
+        // Expected: gateway isn't listening yet, but container should be starting
+      }
+
       // Clear stale state so the retry starts fresh
       startInFlight = null;
       cachedProcesses = null;
