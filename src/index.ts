@@ -196,44 +196,46 @@ async function enrichBlooioPayload(rawText: string, originalUrl: string, origina
 }
 
 /**
- * Process a Bloo.io webhook asynchronously in waitUntil.
- * Retries gateway startup, enriches attachments, and proxies to container.
- * Never throws — errors are logged and swallowed (fire-and-forget).
+ * Ensure the gateway is running with retry logic.
+ * Returns true if gateway is ready, false if all attempts failed.
  */
-async function processBlooioWebhookAsync(
+async function ensureGatewayWithRetry(
   sandbox: ReturnType<typeof getSandbox>,
   env: MoltbotEnv,
+): Promise<boolean> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= WEBHOOK_GATEWAY_MAX_RETRIES; attempt++) {
+    try {
+      await ensureMoltbotGateway(sandbox, env);
+      return true;
+    } catch (err) {
+      lastError = err;
+      console.error(`[BLOOIO] Gateway startup attempt ${attempt + 1}/${WEBHOOK_GATEWAY_MAX_RETRIES + 1} failed:`, err);
+      if (attempt < WEBHOOK_GATEWAY_MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, WEBHOOK_GATEWAY_RETRY_DELAY_MS));
+      }
+    }
+  }
+  console.error(`[BLOOIO] All gateway startup attempts failed`);
+  return false;
+}
+
+/**
+ * Enrich attachments and proxy to container in waitUntil.
+ * Never throws — errors are logged and swallowed (fire-and-forget).
+ */
+async function proxyBlooioToContainer(
+  sandbox: ReturnType<typeof getSandbox>,
   rawText: string,
   originalUrl: string,
   originalHeaders: Headers,
 ): Promise<void> {
   try {
-    // Ensure gateway is running with retry logic
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= WEBHOOK_GATEWAY_MAX_RETRIES; attempt++) {
-      try {
-        await ensureMoltbotGateway(sandbox, env);
-        lastError = null;
-        break;
-      } catch (err) {
-        lastError = err;
-        console.error(`[BLOOIO] Gateway startup attempt ${attempt + 1}/${WEBHOOK_GATEWAY_MAX_RETRIES + 1} failed:`, err);
-        if (attempt < WEBHOOK_GATEWAY_MAX_RETRIES) {
-          await new Promise((resolve) => setTimeout(resolve, WEBHOOK_GATEWAY_RETRY_DELAY_MS));
-        }
-      }
-    }
-    if (lastError) {
-      console.error(`[BLOOIO] All gateway startup attempts failed — dropping webhook`);
-      return;
-    }
-
-    // Enrich attachments and proxy to container
     const enrichedRequest = await enrichBlooioPayload(rawText, originalUrl, originalHeaders);
     const response = await sandbox.containerFetch(enrichedRequest, MOLTBOT_PORT);
     console.log(`[BLOOIO] Container responded: ${response.status}`);
   } catch (err) {
-    console.error(`[BLOOIO] Background processing error:`, err);
+    console.error(`[BLOOIO] Background proxy error:`, err);
   }
 }
 
@@ -462,11 +464,18 @@ app.post('/blooio/inbound', async (c) => {
     console.log(`[BLOOIO] No signature header present — skipping HMAC verification`);
   }
 
-  // Respond 202 immediately — process in background
+  // Ensure gateway is running BEFORE responding — this is fast when warm,
+  // and necessary because containerFetch doesn't work in waitUntil after
+  // the response is sent (sandbox binding lifecycle).
+  const gatewayReady = await ensureGatewayWithRetry(sandbox, c.env);
+  if (!gatewayReady) {
+    return c.json({ error: 'Gateway unavailable' }, 503);
+  }
+
+  // Respond 202 immediately — enrich + proxy in background
   c.executionCtx.waitUntil(
-    processBlooioWebhookAsync(
+    proxyBlooioToContainer(
       sandbox,
-      c.env,
       rawText,
       c.req.url,
       new Headers(c.req.raw.headers),
