@@ -187,7 +187,7 @@ describe('blooio webhook', () => {
     expect(result.body).toEqual({ ok: true });
   });
 
-  it('returns 503 when Bloo.io configuration lookup throws', async () => {
+  it('acks 202 even when Bloo.io configuration lookup throws', async () => {
     const result = await postInboundWebhook({
       getConfig: () => {
         throw new Error('schema validation failed');
@@ -195,11 +195,12 @@ describe('blooio webhook', () => {
     });
 
     expect(result.handled).toBe(true);
-    expect(result.status).toBe(503);
-    expect(result.body).toEqual({ error: 'Bloo.io configuration unavailable' });
+    expect(result.status).toBe(202);
+    expect(result.body).toEqual({ ok: true });
     expect(result.logger.error).toHaveBeenCalledWith(
       expect.stringContaining('Bloo.io config load error: schema validation failed'),
     );
+    expect(result.recordInboundSession).not.toHaveBeenCalled();
   });
 
   it('downloads attachments and sets MediaPaths on inbound context', async () => {
