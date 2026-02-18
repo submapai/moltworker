@@ -409,6 +409,117 @@ describe('blooio webhook', () => {
     expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
   });
 
+  it('uses pre-downloaded base64 attachment data without calling fetch for the URL', async () => {
+    const fakeImageData = Buffer.from('pre-downloaded-image-data');
+    const base64Data = fakeImageData.toString('base64');
+
+    const fetchMock = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200 }));
+    globalThis.fetch = fetchMock as any;
+
+    const imageUrl = 'https://bucket.blooio.com/api-attachments/photo.jpg';
+    const result = await postInboundWebhook({
+      getConfig: () => ({
+        channels: {
+          blooio: {
+            enabled: true,
+          },
+        },
+      }),
+      payload: {
+        event: 'message.received',
+        message_id: 'msg-base64-1',
+        external_id: '+15712170010',
+        timestamp: 1770836813397,
+        text: 'Describe this image',
+        sender: '+15712170010',
+        attachments: [
+          {
+            url: imageUrl,
+            content_type: 'image/jpeg',
+            base64_data: base64Data,
+          },
+        ],
+      },
+    });
+
+    expect(result.status).toBe(202);
+    expect(result.body).toEqual({ ok: true });
+
+    // Verify saveMediaBuffer was called with the decoded buffer
+    expect(result.saveMediaBuffer).toHaveBeenCalledTimes(1);
+    const savedBuffer = result.saveMediaBuffer.mock.calls[0][0];
+    expect(Buffer.isBuffer(savedBuffer)).toBe(true);
+    expect(savedBuffer.toString()).toBe('pre-downloaded-image-data');
+
+    // Verify MediaPaths is set
+    expect(result.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        MediaPaths: expect.arrayContaining([expect.stringContaining('.jpg')]),
+        MediaPath: expect.stringContaining('.jpg'),
+        MediaTypes: ['image/jpeg'],
+        MediaType: 'image/jpeg',
+      }),
+    );
+
+    // Verify fetch was NOT called for the attachment URL
+    const mediaFetchCalls = fetchMock.mock.calls.filter((call) => {
+      const target = call[0];
+      const urlStr = typeof target === 'string' ? target : target instanceof URL ? target.toString() : target.url;
+      return urlStr === imageUrl;
+    });
+    expect(mediaFetchCalls).toHaveLength(0);
+
+    expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to URL download when base64 data is absent', async () => {
+    // Standard mock fetch returns image data
+    const fetchMock = createMockFetch();
+    globalThis.fetch = fetchMock as any;
+
+    const imageUrl = 'https://bucket.blooio.com/api-attachments/photo.jpg';
+    const result = await postInboundWebhook({
+      getConfig: () => ({
+        channels: {
+          blooio: {
+            enabled: true,
+          },
+        },
+      }),
+      payload: {
+        event: 'message.received',
+        message_id: 'msg-no-base64',
+        external_id: '+15712170011',
+        timestamp: 1770836813397,
+        text: 'Check this',
+        sender: '+15712170011',
+        attachments: [
+          {
+            url: imageUrl,
+            // No base64_data — should fall back to fetch
+          },
+        ],
+      },
+    });
+
+    expect(result.status).toBe(202);
+
+    // Verify fetch WAS called for the attachment URL (fallback path)
+    const mediaFetchCalls = fetchMock.mock.calls.filter((call) => {
+      const target = call[0];
+      const urlStr = typeof target === 'string' ? target : target instanceof URL ? target.toString() : target.url;
+      return urlStr === imageUrl;
+    });
+    expect(mediaFetchCalls.length).toBeGreaterThan(0);
+
+    expect(result.saveMediaBuffer).toHaveBeenCalledTimes(1);
+    expect(result.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        MediaPaths: expect.arrayContaining([expect.stringContaining('.jpg')]),
+      }),
+    );
+  });
+
   it('downloads each attachment from webhook attachments array', async () => {
     const urls = [
       'https://bucket.blooio.com/api-attachments/photo-a.jpg',

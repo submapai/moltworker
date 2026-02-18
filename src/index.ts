@@ -70,6 +70,70 @@ function isPublicChannelWebhookPath(pathname: string, env: MoltbotEnv): boolean 
 export { Sandbox };
 
 /**
+ * Enrich Bloo.io webhook attachments by downloading them in the Worker.
+ * The sandbox container cannot make outbound HTTP requests to external domains,
+ * so we fetch attachment binaries here and inject base64-encoded data into
+ * the payload before proxying to the container.
+ */
+async function enrichBlooioAttachments(request: Request): Promise<Request> {
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return request;
+  }
+
+  // Attachments can be at top level or nested under body
+  const attachments = body.attachments || body.body?.attachments;
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return new Request(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: JSON.stringify(body),
+    });
+  }
+
+  const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+  for (const att of attachments) {
+    if (typeof att !== 'object' || att === null) continue;
+    const url = att.url || att.download_url || att.downloadUrl || att.signed_url || att.href;
+    if (!url || typeof url !== 'string') continue;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      const resp = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) {
+        console.log(`[BLOOIO] Attachment fetch failed: ${resp.status} for ${url}`);
+        continue;
+      }
+      const buf = await resp.arrayBuffer();
+      if (buf.byteLength > ATTACHMENT_MAX_BYTES) {
+        console.log(`[BLOOIO] Attachment too large (${buf.byteLength} bytes), skipping: ${url}`);
+        continue;
+      }
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      att.base64_data = btoa(binary);
+      att.content_type = resp.headers.get('content-type') || 'application/octet-stream';
+      console.log(`[BLOOIO] Attachment downloaded: ${url} (${buf.byteLength} bytes)`);
+    } catch (err: any) {
+      console.log(`[BLOOIO] Attachment download error for ${url}: ${err?.message || err}`);
+    }
+  }
+
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: JSON.stringify(body),
+  });
+}
+
+/**
  * Validate required environment variables.
  * Returns an array of missing variable descriptions, or empty array if all are set.
  */
@@ -470,6 +534,15 @@ app.all('*', async (c) => {
   if (url.searchParams.has('_ready')) {
     url.searchParams.delete('_ready');
     request = new Request(url.toString(), request);
+  }
+
+  // Enrich Bloo.io webhook attachments (download in Worker since container can't fetch externally)
+  if (url.pathname === '/blooio/inbound' && request.method === 'POST') {
+    try {
+      request = await enrichBlooioAttachments(request);
+    } catch (err: any) {
+      console.error('[BLOOIO] Attachment enrichment error:', err?.message || err);
+    }
   }
 
   console.log('[HTTP] Proxying:', url.pathname + url.search);
