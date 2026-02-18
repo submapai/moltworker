@@ -70,12 +70,33 @@ function isPublicChannelWebhookPath(pathname: string, env: MoltbotEnv): boolean 
 export { Sandbox };
 
 /**
+ * Compute HMAC-SHA256 using Web Crypto API (available in Workers runtime).
+ */
+async function hmacSha256(secret: string, message: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message));
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
  * Enrich Bloo.io webhook attachments by downloading them in the Worker.
  * The sandbox container cannot make outbound HTTP requests to external domains,
  * so we fetch attachment binaries here and inject base64-encoded data into
  * the payload before proxying to the container.
+ *
+ * After modifying the body, re-signs it with HMAC so the container's signature
+ * verification passes regardless of which container version is deployed.
  */
-async function enrichBlooioAttachments(request: Request): Promise<Request> {
+async function enrichBlooioAttachments(request: Request, webhookSecret?: string): Promise<Request> {
   // Read body as raw text first to preserve exact bytes for HMAC signature verification
   let rawText: string;
   try {
@@ -84,12 +105,9 @@ async function enrichBlooioAttachments(request: Request): Promise<Request> {
     return request;
   }
 
-  // Helper: forward with original bytes, stripping any spoofed trust header
-  const forwardOriginal = () => {
-    const h = new Headers(request.headers);
-    h.delete('x-blooio-worker-enriched');
-    return new Request(request.url, { method: request.method, headers: h, body: rawText });
-  };
+  // Helper: forward with original bytes unchanged
+  const forwardOriginal = () =>
+    new Request(request.url, { method: request.method, headers: request.headers, body: rawText });
 
   let body: any;
   try {
@@ -143,18 +161,28 @@ async function enrichBlooioAttachments(request: Request): Promise<Request> {
     return forwardOriginal();
   }
 
-  // Body was modified — strip webhook signature headers (HMAC won't match the new payload)
-  // and set a trust header so the plugin skips signature verification.
-  // This is safe: the container is only reachable through this Worker.
+  // Body was modified — re-sign with HMAC so the container's signature check passes.
+  // This works with any container version since the signature is always valid.
+  const newBody = JSON.stringify(body);
   const headers = new Headers(request.headers);
-  headers.delete('x-bloo-signature');
-  headers.delete('x-blooio-signature');
-  headers.set('x-blooio-worker-enriched', '1');
+
+  if (webhookSecret) {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const hmac = await hmacSha256(webhookSecret, `${timestamp}.${newBody}`);
+    headers.set('x-blooio-signature', `t=${timestamp},v1=${hmac}`);
+    headers.set('x-bloo-signature', `t=${timestamp},v1=${hmac}`);
+    console.log(`[BLOOIO] Re-signed enriched body (${newBody.length} bytes)`);
+  } else {
+    // No secret available — strip old signatures (they won't match modified body)
+    headers.delete('x-bloo-signature');
+    headers.delete('x-blooio-signature');
+    console.log(`[BLOOIO] No webhook secret — stripped stale signatures`);
+  }
 
   return new Request(request.url, {
     method: request.method,
     headers,
-    body: JSON.stringify(body),
+    body: newBody,
   });
 }
 
@@ -564,7 +592,7 @@ app.all('*', async (c) => {
   // Enrich Bloo.io webhook attachments (download in Worker since container can't fetch externally)
   if (url.pathname === '/blooio/inbound' && request.method === 'POST') {
     try {
-      request = await enrichBlooioAttachments(request);
+      request = await enrichBlooioAttachments(request, c.env.BLOOIO_WEBHOOK_SECRET);
     } catch (err: any) {
       console.error('[BLOOIO] Attachment enrichment error:', err?.message || err);
     }
