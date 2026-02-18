@@ -93,53 +93,113 @@ async function hmacSha256(secret: string, message: string): Promise<string> {
  * so we fetch attachment binaries here and inject base64-encoded data into
  * the payload before proxying to the container.
  *
- * After modifying the body, re-signs it with HMAC so the container's signature
- * verification passes regardless of which container version is deployed.
+ * Verifies HMAC signature before downloading attachments to avoid wasting
+ * resources on unauthenticated requests. After enrichment, strips signature
+ * headers — the container trusts requests from the Worker without signatures.
+ *
+ * Returns a Response (e.g. 401) to short-circuit, or a Request to proxy.
  */
-async function enrichBlooioAttachments(request: Request, webhookSecret?: string): Promise<Request> {
+async function enrichBlooioAttachments(request: Request, webhookSecret?: string): Promise<Request | Response> {
+  const SIGNATURE_MAX_AGE_SEC = 300;
+
   // Read body as raw text first to preserve exact bytes for HMAC signature verification
   let rawText: string;
   try {
     rawText = await request.text();
-  } catch {
+  } catch (err: any) {
+    console.error(`[BLOOIO] Failed to read request body: ${err?.message || err}`);
     return request;
   }
 
-  // Helper: forward with original bytes unchanged
-  const forwardOriginal = () =>
-    new Request(request.url, { method: request.method, headers: request.headers, body: rawText });
+  // Helper: forward with original bytes unchanged (strip signatures since Worker validated)
+  const forwardOriginal = () => {
+    const headers = new Headers(request.headers);
+    headers.delete('x-bloo-signature');
+    headers.delete('x-blooio-signature');
+    return new Request(request.url, { method: request.method, headers, body: rawText });
+  };
+
+  // --- HMAC verification (before any attachment downloads) ---
+  const signature = request.headers.get('x-bloo-signature') || request.headers.get('x-blooio-signature');
+  if (webhookSecret && signature) {
+    const { timestampSec, hmacHex } = parseBlooioSignature(signature);
+    if (!timestampSec || !hmacHex) {
+      console.error(`[BLOOIO] Malformed signature header: ${signature}`);
+      return new Response(JSON.stringify({ error: 'Invalid signature' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const expected = await hmacSha256(webhookSecret, `${timestampSec}.${rawText}`);
+    if (expected.toLowerCase() !== hmacHex.toLowerCase()) {
+      console.error(`[BLOOIO] HMAC mismatch — rejecting webhook`);
+      return new Response(JSON.stringify({ error: 'Invalid signature' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSec - timestampSec) > SIGNATURE_MAX_AGE_SEC) {
+      console.error(`[BLOOIO] Stale signature (age: ${Math.abs(nowSec - timestampSec)}s, max: ${SIGNATURE_MAX_AGE_SEC}s)`);
+      return new Response(JSON.stringify({ error: 'Stale signature' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    console.log(`[BLOOIO] HMAC verified`);
+  } else if (webhookSecret && !signature) {
+    console.log(`[BLOOIO] No signature header present — skipping HMAC verification`);
+  }
 
   let body: any;
   try {
     body = JSON.parse(rawText);
-  } catch {
+  } catch (err: any) {
+    console.error(`[BLOOIO] Failed to parse webhook JSON: ${err?.message || err}`);
     return forwardOriginal();
   }
 
   // Attachments can be at top level or nested under body
   const attachments = body.attachments || body.body?.attachments;
   if (!Array.isArray(attachments) || attachments.length === 0) {
+    console.log(`[BLOOIO] No attachments array in payload (keys: ${Object.keys(body).join(', ')})`);
     return forwardOriginal();
   }
 
+  console.log(`[BLOOIO] Enriching ${attachments.length} attachment(s)`);
   const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
-  for (const att of attachments) {
-    if (typeof att !== 'object' || att === null) continue;
+  for (let idx = 0; idx < attachments.length; idx++) {
+    const att = attachments[idx];
+    if (typeof att !== 'object' || att === null) {
+      console.warn(`[BLOOIO] Attachment[${idx}] is not an object: ${typeof att} ${JSON.stringify(att)}`);
+      continue;
+    }
     const url = att.url || att.download_url || att.downloadUrl || att.signed_url || att.href;
-    if (!url || typeof url !== 'string') continue;
+    if (!url || typeof url !== 'string') {
+      console.warn(`[BLOOIO] Attachment[${idx}] has no URL field (keys: ${Object.keys(att).join(', ')})`);
+      continue;
+    }
     try {
+      console.log(`[BLOOIO] Attachment[${idx}] fetching: ${url}`);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30_000);
       const resp = await fetch(url, { signal: controller.signal });
       clearTimeout(timeout);
       if (!resp.ok) {
-        console.log(`[BLOOIO] Attachment fetch failed: ${resp.status} for ${url}`);
+        const respBody = await resp.text().catch(() => '');
+        console.error(`[BLOOIO] Attachment[${idx}] fetch failed: HTTP ${resp.status} ${resp.statusText} for ${url} — body: ${respBody.slice(0, 500)}`);
         continue;
       }
+      const contentType = resp.headers.get('content-type') || 'application/octet-stream';
       const buf = await resp.arrayBuffer();
+      console.log(`[BLOOIO] Attachment[${idx}] response: ${buf.byteLength} bytes, content-type: ${contentType}`);
       if (buf.byteLength > ATTACHMENT_MAX_BYTES) {
-        console.log(`[BLOOIO] Attachment too large (${buf.byteLength} bytes), skipping: ${url}`);
+        console.warn(`[BLOOIO] Attachment[${idx}] too large (${buf.byteLength} bytes), skipping: ${url}`);
+        continue;
+      }
+      if (buf.byteLength === 0) {
+        console.warn(`[BLOOIO] Attachment[${idx}] empty response body (0 bytes), skipping: ${url}`);
         continue;
       }
       const bytes = new Uint8Array(buf);
@@ -148,42 +208,49 @@ async function enrichBlooioAttachments(request: Request, webhookSecret?: string)
         binary += String.fromCharCode(bytes[i]);
       }
       att.base64_data = btoa(binary);
-      att.content_type = resp.headers.get('content-type') || 'application/octet-stream';
-      console.log(`[BLOOIO] Attachment downloaded: ${url} (${buf.byteLength} bytes)`);
+      att.content_type = contentType;
+      console.log(`[BLOOIO] Attachment[${idx}] enriched: ${url} (${buf.byteLength} bytes, ${contentType}, base64 length: ${att.base64_data.length})`);
     } catch (err: any) {
-      console.log(`[BLOOIO] Attachment download error for ${url}: ${err?.message || err}`);
+      const isAbort = err?.name === 'AbortError';
+      console.error(`[BLOOIO] Attachment[${idx}] download error for ${url}: ${isAbort ? 'TIMEOUT (30s)' : err?.message || err}`);
     }
   }
 
-  // If no attachments were actually enriched, preserve original body for signature
+  // If no attachments were actually enriched, forward original (signatures already stripped)
   const enriched = attachments.some((att: any) => att.base64_data);
   if (!enriched) {
+    console.error(`[BLOOIO] No attachments were enriched out of ${attachments.length} — forwarding original payload`);
     return forwardOriginal();
   }
+  console.log(`[BLOOIO] ${attachments.filter((a: any) => a.base64_data).length}/${attachments.length} attachment(s) enriched`);
 
-  // Body was modified — re-sign with HMAC so the container's signature check passes.
-  // This works with any container version since the signature is always valid.
+  // Strip signature headers — the Worker already verified HMAC above, and the
+  // container trusts forwarded requests without signatures.
   const newBody = JSON.stringify(body);
   const headers = new Headers(request.headers);
-
-  if (webhookSecret) {
-    const timestamp = Math.floor(Date.now() / 1000);
-    const hmac = await hmacSha256(webhookSecret, `${timestamp}.${newBody}`);
-    headers.set('x-blooio-signature', `t=${timestamp},v1=${hmac}`);
-    headers.set('x-bloo-signature', `t=${timestamp},v1=${hmac}`);
-    console.log(`[BLOOIO] Re-signed enriched body (${newBody.length} bytes)`);
-  } else {
-    // No secret available — strip old signatures (they won't match modified body)
-    headers.delete('x-bloo-signature');
-    headers.delete('x-blooio-signature');
-    console.log(`[BLOOIO] No webhook secret — stripped stale signatures`);
-  }
+  headers.delete('x-bloo-signature');
+  headers.delete('x-blooio-signature');
 
   return new Request(request.url, {
     method: request.method,
     headers,
     body: newBody,
   });
+}
+
+/**
+ * Parse Bloo.io signature header format: "t=<unix_sec>,v1=<hex>"
+ */
+function parseBlooioSignature(header: string): { timestampSec: number | null; hmacHex: string | null } {
+  const parts = header.split(',').map((p) => p.trim()).filter(Boolean);
+  const tPart = parts.find((p) => p.startsWith('t='));
+  const v1Part = parts.find((p) => p.startsWith('v1='));
+  if (!tPart || !v1Part) return { timestampSec: null, hmacHex: null };
+  const ts = Number(tPart.slice(2));
+  return {
+    timestampSec: Number.isFinite(ts) ? ts : null,
+    hmacHex: v1Part.slice(3) || null,
+  };
 }
 
 /**
@@ -592,7 +659,9 @@ app.all('*', async (c) => {
   // Enrich Bloo.io webhook attachments (download in Worker since container can't fetch externally)
   if (url.pathname === '/blooio/inbound' && request.method === 'POST') {
     try {
-      request = await enrichBlooioAttachments(request, c.env.BLOOIO_WEBHOOK_SECRET);
+      const result = await enrichBlooioAttachments(request, c.env.BLOOIO_WEBHOOK_SECRET);
+      if (result instanceof Response) return result; // HMAC rejected — short-circuit
+      request = result;
     } catch (err: any) {
       console.error('[BLOOIO] Attachment enrichment error:', err?.message || err);
     }
