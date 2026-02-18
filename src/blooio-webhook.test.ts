@@ -234,9 +234,9 @@ describe('blooio webhook', () => {
         // MediaPaths should be set (local temp file)
         MediaPaths: expect.arrayContaining([expect.stringContaining('.jpg')]),
         MediaPath: expect.stringContaining('.jpg'),
-        // MediaUrls should also be preserved as reference
-        MediaUrls: [imageUrl],
-        MediaUrl: imageUrl,
+        // MediaUrls should mirror saved local paths (BlueBubbles-style)
+        MediaUrls: expect.arrayContaining([expect.stringContaining('.jpg')]),
+        MediaUrl: expect.stringContaining('.jpg'),
         MediaTypes: ['image/jpeg'],
         MediaType: 'image/jpeg',
       }),
@@ -278,7 +278,7 @@ describe('blooio webhook', () => {
     expect(result.finalizeInboundContext).toHaveBeenCalledWith(
       expect.objectContaining({
         MediaPaths: expect.arrayContaining([expect.stringContaining('.pdf')]),
-        MediaUrls: [pdfUrl],
+        MediaUrls: expect.arrayContaining([expect.stringContaining('.pdf')]),
         MediaTypes: ['application/pdf'],
       }),
     );
@@ -315,7 +315,7 @@ describe('blooio webhook', () => {
     expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to MediaUrls when download fails', async () => {
+  it('does not pass remote MediaUrls when download fails', async () => {
     // Override fetch to simulate download failure
     globalThis.fetch = vi.fn(async () => new Response(null, { status: 500 })) as any;
 
@@ -340,16 +340,16 @@ describe('blooio webhook', () => {
     });
 
     expect(result.status).toBe(202);
-    expect(result.finalizeInboundContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        // Should fall back to remote URLs since download failed
-        MediaUrls: [imageUrl],
-        MediaUrl: imageUrl,
-      }),
-    );
-    // Should NOT have MediaPaths since download failed
     const ctx = result.finalizeInboundContext.mock.calls[0]?.[0];
+    // Should not pass remote URLs when download fails
+    expect(ctx?.MediaUrls).toBeUndefined();
+    expect(ctx?.MediaUrl).toBeUndefined();
+    // Should also not have local media path fields when download fails
     expect(ctx?.MediaPaths).toBeUndefined();
+    expect(ctx?.MediaPath).toBeUndefined();
+    // If no local media was saved, media type fields should be omitted as well
+    expect(ctx?.MediaTypes).toBeUndefined();
+    expect(ctx?.MediaType).toBeUndefined();
     expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
   });
 
@@ -402,7 +402,7 @@ describe('blooio webhook', () => {
     expect(result.finalizeInboundContext).toHaveBeenCalledWith(
       expect.objectContaining({
         MediaPaths: expect.arrayContaining([expect.stringContaining('.jpg')]),
-        MediaUrls: [imageUrl],
+        MediaUrls: expect.arrayContaining([expect.stringContaining('.jpg')]),
       }),
     );
     expect(result.recordInboundSession).toHaveBeenCalledTimes(1);
