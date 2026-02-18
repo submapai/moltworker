@@ -52,7 +52,7 @@ describe('worker channel webhook routing', () => {
     mocks.syncToR2.mockResolvedValue({ success: true, lastSync: new Date().toISOString() });
   });
 
-  it('proxies /blooio/inbound via catch-all without CF Access middleware', async () => {
+  it('responds 202 immediately for /blooio/inbound and proxies in background', async () => {
     const containerFetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {
         status: 202,
@@ -76,18 +76,16 @@ describe('worker channel webhook routing', () => {
     const ctx = createExecutionContext();
     const res = await worker.fetch(req, env, ctx);
 
-    // Catch-all passes raw request to container and returns container's response
+    // Worker responds 202 immediately without waiting for container
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ ok: true });
     expect(mocks.createAccessMiddleware).not.toHaveBeenCalled();
     expect(authMiddleware).not.toHaveBeenCalled();
-    expect(mocks.ensureMoltbotGateway).toHaveBeenCalledOnce();
-    expect(containerFetch).toHaveBeenCalledOnce();
-    expect(containerFetch.mock.calls[0][0]).toBe(req);
-    expect(containerFetch.mock.calls[0][1]).toBe(18789);
+    // Background processing is deferred via waitUntil
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
   });
 
-  it('returns 503 when gateway fails for /blooio/inbound', async () => {
+  it('responds 202 for /blooio/inbound even when gateway fails (error is logged in background)', async () => {
     const containerFetch = vi.fn();
     mocks.getSandbox.mockReturnValue({
       containerFetch,
@@ -102,12 +100,13 @@ describe('worker channel webhook routing', () => {
       body: JSON.stringify({ event: 'inbound_message' }),
     });
     const env = createMockEnv();
-    const res = await worker.fetch(req, env, createExecutionContext());
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(req, env, ctx);
 
-    expect(res.status).toBe(503);
-    expect(await res.json()).toMatchObject({ error: 'Moltbot gateway failed to start' });
-    expect(mocks.ensureMoltbotGateway).toHaveBeenCalledOnce();
-    expect(containerFetch).not.toHaveBeenCalled();
+    // Worker still responds 202 — gateway failure is handled in background
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
   });
 
   it('proxies /email/inbound without applying CF Access middleware', async () => {
